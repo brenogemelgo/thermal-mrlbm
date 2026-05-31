@@ -1,0 +1,73 @@
+#pragma once
+
+#ifdef D3Q19
+#include "D3Q19.cuh"
+#elif defined(D3Q27)
+#include "D3Q27.cuh"
+#endif
+
+__device__ [[nodiscard]] static __forceinline__ natural_t global3(
+    const natural_t x,
+    const natural_t y,
+    const natural_t z) noexcept
+{
+    return x + y * NX + z * STRIDE;
+}
+
+__device__ __host__ [[nodiscard]] static __forceinline__ natural_t midx(
+    const natural_t idx,
+    const natural_t moment) noexcept
+{
+    return idx + CELLS * moment;
+}
+
+__device__ static __forceinline__ real_t fma_rn(real_t a, real_t b, real_t c)
+{
+    if constexpr (std::is_same_v<real_t, float>)
+    {
+        return fma_rn(a, b, c);
+    }
+    else
+    {
+        return __fma_rn(a, b, c);
+    }
+}
+
+__device__ [[nodiscard]] static __forceinline__ real_t loadMoment(
+    const real_t *__restrict__ moments,
+    const natural_t idx,
+    const natural_t moment) noexcept
+{
+    return __ldg(moments + midx(idx, moment));
+}
+
+template <typename T, T v>
+struct IntegralConstant
+{
+    static constexpr const T value = v;
+    using value_type = T;
+    using type = IntegralConstant;
+
+    __device__ [[nodiscard]] inline consteval operator value_type() const noexcept
+    {
+        return value;
+    }
+
+    __device__ [[nodiscard]] inline consteval value_type operator()() const noexcept
+    {
+        return value;
+    }
+};
+
+template <const natural_t Start, const natural_t End, typename F>
+__device__ __forceinline__ constexpr void constexpr_for(F &&f) noexcept
+{
+    if constexpr (Start < End)
+    {
+        f(IntegralConstant<natural_t, Start>());
+        if constexpr (Start + 1 < End)
+        {
+            constexpr_for<Start + 1, End>(std::forward<F>(f));
+        }
+    }
+}

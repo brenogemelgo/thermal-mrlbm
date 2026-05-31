@@ -291,15 +291,7 @@ __global__ void stream(
     constexpr_for<0, ThermalVelocitySet::Q()>(
         [&](const auto Q) noexcept
         {
-            accumulateThermalDirection<Q>(
-                moments,
-                x,
-                y,
-                z,
-                temperature,
-                jx,
-                jy,
-                jz);
+            accumulateThermalDirection<Q>(moments, x, y, z, temperature, jx, jy, jz);
         });
 
     dbuffer[midx(idx, TEMP)] = temperature;

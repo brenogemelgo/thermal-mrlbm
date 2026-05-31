@@ -340,181 +340,229 @@ __global__ void collide(
     }
 
     const natural_t idx = global3(x, y, z);
-    const uint8_t nodeType = boundaryMask(x, y, z);
 
-    if (nodeType != BULK)
+    if (boundaryMask(x, y, z) != BULK)
     {
         copyAllMoments(moments, dbuffer, idx, idx);
-
         return;
     }
 
-    real_t rho = dbuffer[midx(idx, RHO)];
-    real_t ux = dbuffer[midx(idx, UX)];
-    real_t uy = dbuffer[midx(idx, UY)];
-    real_t uz = dbuffer[midx(idx, UZ)];
-    real_t mxx = dbuffer[midx(idx, MXX)];
-    real_t myy = dbuffer[midx(idx, MYY)];
-    real_t mzz = dbuffer[midx(idx, MZZ)];
-    real_t mxy = dbuffer[midx(idx, MXY)];
-    real_t mxz = dbuffer[midx(idx, MXZ)];
-    real_t myz = dbuffer[midx(idx, MYZ)];
+    constexpr real_t scaleI = VelocitySet::scaleI();
+    constexpr real_t scaleII = VelocitySet::scaleII();
+    constexpr real_t scaleIJ = VelocitySet::scaleIJ();
+    constexpr real_t invScaleI = static_cast<real_t>(1) / scaleI;
+    constexpr real_t halfScaleI = static_cast<real_t>(0.5) * scaleI;
+    constexpr real_t oneThird = static_cast<real_t>(1.0 / 3.0);
+    constexpr real_t fluxOmega = static_cast<real_t>(1) - OMEGA_T;
+    constexpr real_t invThermalCs2 = ThermalVelocitySet::as2();
 
-    real_t temperature = static_cast<real_t>(0);
-    real_t jx = static_cast<real_t>(0);
-    real_t jy = static_cast<real_t>(0);
-    real_t jz = static_cast<real_t>(0);
-
-    temperature = dbuffer[midx(idx, TEMP)];
-    jx = dbuffer[midx(idx, TFX)];
-    jy = dbuffer[midx(idx, TFY)];
-    jz = dbuffer[midx(idx, TFZ)];
-
+    const real_t rho = dbuffer[midx(idx, RHO)];
     const real_t invRho = static_cast<real_t>(1) / rho;
 
-    real_t forceX = static_cast<real_t>(0);
-    real_t forceY = static_cast<real_t>(0);
-    real_t forceZ = static_cast<real_t>(0);
+    real_t ux = dbuffer[midx(idx, UX)] * scaleI;
+    real_t uy = dbuffer[midx(idx, UY)] * scaleI;
+    real_t uz = dbuffer[midx(idx, UZ)] * scaleI;
 
-    if (nodeType == BULK)
+    real_t mxx = dbuffer[midx(idx, MXX)] * scaleII;
+    real_t myy = dbuffer[midx(idx, MYY)] * scaleII;
+    real_t mzz = dbuffer[midx(idx, MZZ)] * scaleII;
+    real_t mxy = dbuffer[midx(idx, MXY)] * scaleIJ;
+    real_t mxz = dbuffer[midx(idx, MXZ)] * scaleIJ;
+    real_t myz = dbuffer[midx(idx, MYZ)] * scaleIJ;
+
+    const real_t temperature = dbuffer[midx(idx, TEMP)];
+    const real_t jx = dbuffer[midx(idx, TFX)];
+    const real_t jy = dbuffer[midx(idx, TFY)];
+    const real_t jz = dbuffer[midx(idx, TFZ)];
+
+    real_t uxEq = ux;
+    real_t uyEq = uy;
+    real_t uzEq = uz;
+
+    real_t uxStore = ux;
+    real_t uyStore = uy;
+    real_t uzStore = uz;
+
+    if constexpr (THERMAL_FORCE_ACTIVE)
     {
-        const real_t buoyancy = THERMAL_RHO0 * BETA_THERMAL * THERMAL_FORCE_SCALE * (temperature - T_REF);
+        const real_t buoyancy =
+            THERMAL_RHO0 *
+            BETA_THERMAL *
+            THERMAL_FORCE_SCALE *
+            (temperature - T_REF);
 
-        forceX += buoyancy * THERMAL_GRAVITY_X;
-        forceY += buoyancy * THERMAL_GRAVITY_Y;
-        forceZ += buoyancy * THERMAL_GRAVITY_Z;
+        if constexpr (THERMAL_FORCE_X_ACTIVE)
+        {
+            const real_t forceX = buoyancy * THERMAL_GRAVITY_X;
+            uxEq = __fmaf_rn(halfScaleI * invRho, forceX, ux);
+            uxStore = __fmaf_rn(scaleI * invRho, forceX, ux);
+        }
+
+        if constexpr (THERMAL_FORCE_Y_ACTIVE)
+        {
+            const real_t forceY = buoyancy * THERMAL_GRAVITY_Y;
+            uyEq = __fmaf_rn(halfScaleI * invRho, forceY, uy);
+            uyStore = __fmaf_rn(scaleI * invRho, forceY, uy);
+        }
+
+        if constexpr (THERMAL_FORCE_Z_ACTIVE)
+        {
+            const real_t forceZ = buoyancy * THERMAL_GRAVITY_Z;
+            uzEq = __fmaf_rn(halfScaleI * invRho, forceZ, uz);
+            uzStore = __fmaf_rn(scaleI * invRho, forceZ, uz);
+        }
     }
-
-    const real_t omega = OMEGA;
-    const real_t tOmega = T_OMEGA;
-    const real_t omegaBulk = OMEGA_BULK;
-    const real_t tOmegaBulk = T_OMEGA_BULK;
-
-    const real_t ttOmega = static_cast<real_t>(1) - static_cast<real_t>(0.5) * omega;
-    const real_t ttOmegaBulk = static_cast<real_t>(1) - static_cast<real_t>(0.5) * omegaBulk;
-
-    ux *= VelocitySet::scaleI();
-    uy *= VelocitySet::scaleI();
-    uz *= VelocitySet::scaleI();
-
-    mxx *= VelocitySet::scaleII();
-    myy *= VelocitySet::scaleII();
-    mzz *= VelocitySet::scaleII();
-    mxy *= VelocitySet::scaleIJ();
-    mxz *= VelocitySet::scaleIJ();
-    myz *= VelocitySet::scaleIJ();
-
-    const real_t uxEq = ux + static_cast<real_t>(0.5) * VelocitySet::scaleI() * invRho * forceX;
-    const real_t uyEq = uy + static_cast<real_t>(0.5) * VelocitySet::scaleI() * invRho * forceY;
-    const real_t uzEq = uz + static_cast<real_t>(0.5) * VelocitySet::scaleI() * invRho * forceZ;
-
-    const real_t uxStore = ux + VelocitySet::scaleI() * invRho * forceX;
-    const real_t uyStore = uy + VelocitySet::scaleI() * invRho * forceY;
-    const real_t uzStore = uz + VelocitySet::scaleI() * invRho * forceZ;
 
     const real_t eqXX = static_cast<real_t>(0.5) * uxEq * uxEq;
     const real_t eqYY = static_cast<real_t>(0.5) * uyEq * uyEq;
     const real_t eqZZ = static_cast<real_t>(0.5) * uzEq * uzEq;
-
-    const real_t eqXY = uxEq * uyEq;
-    const real_t eqXZ = uxEq * uzEq;
-    const real_t eqYZ = uyEq * uzEq;
-
-    const real_t oneThird = static_cast<real_t>(1.0 / 3.0);
 
     const real_t trace = mxx + myy + mzz;
     const real_t traceEq = eqXX + eqYY + eqZZ;
 
     const real_t traceThird = oneThird * trace;
     const real_t traceEqThird = oneThird * traceEq;
-
     const real_t tracePostThird =
-        oneThird * (tOmegaBulk * trace + omegaBulk * traceEq);
+        oneThird * (T_OMEGA_BULK * trace + OMEGA_BULK * traceEq);
 
-    real_t mxxPost =
-        tOmega * (mxx - traceThird) +
-        omega * (eqXX - traceEqThird) +
+    mxx =
+        T_OMEGA * (mxx - traceThird) +
+        OMEGA * (eqXX - traceEqThird) +
         tracePostThird;
 
-    real_t myyPost =
-        tOmega * (myy - traceThird) +
-        omega * (eqYY - traceEqThird) +
+    myy =
+        T_OMEGA * (myy - traceThird) +
+        OMEGA * (eqYY - traceEqThird) +
         tracePostThird;
 
-    real_t mzzPost =
-        tOmega * (mzz - traceThird) +
-        omega * (eqZZ - traceEqThird) +
+    mzz =
+        T_OMEGA * (mzz - traceThird) +
+        OMEGA * (eqZZ - traceEqThird) +
         tracePostThird;
 
-    real_t mxyPost = tOmega * mxy + omega * eqXY;
-    real_t mxzPost = tOmega * mxz + omega * eqXZ;
-    real_t myzPost = tOmega * myz + omega * eqYZ;
+    mxy = __fmaf_rn(OMEGA, uxEq * uyEq, T_OMEGA * mxy);
+    mxz = __fmaf_rn(OMEGA, uxEq * uzEq, T_OMEGA * mxz);
+    myz = __fmaf_rn(OMEGA, uyEq * uzEq, T_OMEGA * myz);
 
-    const real_t sxx = VelocitySet::scaleI() * invRho * forceX * uxEq;
-    const real_t syy = VelocitySet::scaleI() * invRho * forceY * uyEq;
-    const real_t szz = VelocitySet::scaleI() * invRho * forceZ * uzEq;
+    if constexpr (THERMAL_FORCE_ACTIVE)
+    {
+        constexpr real_t ttOmega =
+            static_cast<real_t>(1) - static_cast<real_t>(0.5) * OMEGA;
 
-    const real_t sxy = VelocitySet::scaleI() * invRho * (forceX * uyEq + forceY * uxEq);
-    const real_t sxz = VelocitySet::scaleI() * invRho * (forceX * uzEq + forceZ * uxEq);
-    const real_t syz = VelocitySet::scaleI() * invRho * (forceY * uzEq + forceZ * uyEq);
+        constexpr real_t ttOmegaBulk =
+            static_cast<real_t>(1) - static_cast<real_t>(0.5) * OMEGA_BULK;
 
-    const real_t sourceTrace = sxx + syy + szz;
-    const real_t sourceTraceThird = oneThird * sourceTrace;
+        const real_t buoyancy =
+            THERMAL_RHO0 *
+            BETA_THERMAL *
+            THERMAL_FORCE_SCALE *
+            (temperature - T_REF);
 
-    mxxPost += ttOmega * (sxx - sourceTraceThird) +
+        real_t sxx = static_cast<real_t>(0);
+        real_t syy = static_cast<real_t>(0);
+        real_t szz = static_cast<real_t>(0);
+        real_t sxy = static_cast<real_t>(0);
+        real_t sxz = static_cast<real_t>(0);
+        real_t syz = static_cast<real_t>(0);
+
+        if constexpr (THERMAL_FORCE_X_ACTIVE)
+        {
+            const real_t forceX = buoyancy * THERMAL_GRAVITY_X;
+            sxx = scaleI * invRho * forceX * uxEq;
+
+            if constexpr (THERMAL_FORCE_Y_ACTIVE)
+            {
+                sxy += scaleI * invRho * forceX * uyEq;
+            }
+
+            if constexpr (THERMAL_FORCE_Z_ACTIVE)
+            {
+                sxz += scaleI * invRho * forceX * uzEq;
+            }
+        }
+
+        if constexpr (THERMAL_FORCE_Y_ACTIVE)
+        {
+            const real_t forceY = buoyancy * THERMAL_GRAVITY_Y;
+            syy = scaleI * invRho * forceY * uyEq;
+
+            if constexpr (THERMAL_FORCE_X_ACTIVE)
+            {
+                sxy += scaleI * invRho * forceY * uxEq;
+            }
+
+            if constexpr (THERMAL_FORCE_Z_ACTIVE)
+            {
+                syz += scaleI * invRho * forceY * uzEq;
+            }
+        }
+
+        if constexpr (THERMAL_FORCE_Z_ACTIVE)
+        {
+            const real_t forceZ = buoyancy * THERMAL_GRAVITY_Z;
+            szz = scaleI * invRho * forceZ * uzEq;
+
+            if constexpr (THERMAL_FORCE_X_ACTIVE)
+            {
+                sxz += scaleI * invRho * forceZ * uxEq;
+            }
+
+            if constexpr (THERMAL_FORCE_Y_ACTIVE)
+            {
+                syz += scaleI * invRho * forceZ * uyEq;
+            }
+        }
+
+        const real_t sourceTraceThird = oneThird * (sxx + syy + szz);
+
+        mxx += ttOmega * (sxx - sourceTraceThird) +
                ttOmegaBulk * sourceTraceThird;
 
-    myyPost += ttOmega * (syy - sourceTraceThird) +
+        myy += ttOmega * (syy - sourceTraceThird) +
                ttOmegaBulk * sourceTraceThird;
 
-    mzzPost += ttOmega * (szz - sourceTraceThird) +
+        mzz += ttOmega * (szz - sourceTraceThird) +
                ttOmegaBulk * sourceTraceThird;
 
-    mxyPost += ttOmega * sxy;
-    mxzPost += ttOmega * sxz;
-    myzPost += ttOmega * syz;
+        mxy += ttOmega * sxy;
+        mxz += ttOmega * sxz;
+        myz += ttOmega * syz;
+    }
 
     moments[midx(idx, RHO)] = rho;
     moments[midx(idx, UX)] = uxStore;
     moments[midx(idx, UY)] = uyStore;
     moments[midx(idx, UZ)] = uzStore;
-    moments[midx(idx, MXX)] = mxxPost;
-    moments[midx(idx, MYY)] = myyPost;
-    moments[midx(idx, MZZ)] = mzzPost;
-    moments[midx(idx, MXY)] = mxyPost;
-    moments[midx(idx, MXZ)] = mxzPost;
-    moments[midx(idx, MYZ)] = myzPost;
+    moments[midx(idx, MXX)] = mxx;
+    moments[midx(idx, MYY)] = myy;
+    moments[midx(idx, MZZ)] = mzz;
+    moments[midx(idx, MXY)] = mxy;
+    moments[midx(idx, MXZ)] = mxz;
+    moments[midx(idx, MYZ)] = myz;
 
-    const real_t invHydroScaleI = static_cast<real_t>(1) / VelocitySet::scaleI();
+    const real_t uxThermal = uxEq * invScaleI;
+    const real_t uyThermal = uyEq * invScaleI;
+    const real_t uzThermal = uzEq * invScaleI;
 
-    const real_t uxThermal = uxEq * invHydroScaleI;
-    const real_t uyThermal = uyEq * invHydroScaleI;
-    const real_t uzThermal = uzEq * invHydroScaleI;
+    moments[midx(idx, TEMP)] =
+        temperature +
+        (THERMAL_SOURCE_ACTIVE ? THERMAL_SOURCE_VALUE : static_cast<real_t>(0));
 
-    const real_t fluxOmega = static_cast<real_t>(1) - OMEGA_T;
-    const real_t invThermalCs2 = ThermalVelocitySet::as2();
+    moments[midx(idx, TFX)] =
+        invThermalCs2 *
+        (fluxOmega * jx +
+         OMEGA_T * temperature * uxThermal +
+         (THERMAL_SOURCE_ACTIVE ? THERMAL_SOURCE_VALUE * uxThermal : static_cast<real_t>(0)));
 
-    const real_t temperaturePost = temperature + THERMAL_SOURCE_VALUE;
+    moments[midx(idx, TFY)] =
+        invThermalCs2 *
+        (fluxOmega * jy +
+         OMEGA_T * temperature * uyThermal +
+         (THERMAL_SOURCE_ACTIVE ? THERMAL_SOURCE_VALUE * uyThermal : static_cast<real_t>(0)));
 
-    const real_t qxPost =
-        fluxOmega * jx +
-        OMEGA_T * temperature * uxThermal +
-        THERMAL_SOURCE_VALUE * uxThermal;
-
-    const real_t qyPost =
-        fluxOmega * jy +
-        OMEGA_T * temperature * uyThermal +
-        THERMAL_SOURCE_VALUE * uyThermal;
-
-    const real_t qzPost =
-        fluxOmega * jz +
-        OMEGA_T * temperature * uzThermal +
-        THERMAL_SOURCE_VALUE * uzThermal;
-
-    moments[midx(idx, TEMP)] = temperaturePost;
-    moments[midx(idx, TFX)] = qxPost * invThermalCs2;
-    moments[midx(idx, TFY)] = qyPost * invThermalCs2;
-    moments[midx(idx, TFZ)] = qzPost * invThermalCs2;
+    moments[midx(idx, TFZ)] =
+        invThermalCs2 *
+        (fluxOmega * jz +
+         OMEGA_T * temperature * uzThermal +
+         (THERMAL_SOURCE_ACTIVE ? THERMAL_SOURCE_VALUE * uzThermal : static_cast<real_t>(0)));
 }
-
-// =================================================================================================== //

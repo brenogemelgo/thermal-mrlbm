@@ -230,3 +230,23 @@ static_assert(HYDRO_MOMENTS == 10, "Hydro MR layout expects 10 moments.");
 static_assert(NUM_MOMENTS == 14, "Thermal MR layout expects 14 moments.");
 
 // =================================================================================================== //
+
+constexpr bool THERMAL_SOURCE_ACTIVE =
+    THERMAL_SOURCE_VALUE != static_cast<real_t>(0);
+
+constexpr bool THERMAL_FORCE_X_ACTIVE =
+    BETA_THERMAL != static_cast<real_t>(0) &&
+    THERMAL_GRAVITY_X != static_cast<real_t>(0);
+
+constexpr bool THERMAL_FORCE_Y_ACTIVE =
+    BETA_THERMAL != static_cast<real_t>(0) &&
+    THERMAL_GRAVITY_Y != static_cast<real_t>(0);
+
+constexpr bool THERMAL_FORCE_Z_ACTIVE =
+    BETA_THERMAL != static_cast<real_t>(0) &&
+    THERMAL_GRAVITY_Z != static_cast<real_t>(0);
+
+constexpr bool THERMAL_FORCE_ACTIVE =
+    THERMAL_FORCE_X_ACTIVE ||
+    THERMAL_FORCE_Y_ACTIVE ||
+    THERMAL_FORCE_Z_ACTIVE;

@@ -53,9 +53,7 @@ __device__ [[nodiscard]] static __forceinline__ bool isJetBulk(
     const natural_t y,
     const natural_t z) noexcept
 {
-    return !isJetInlet(x, y, z) &&
-           !isJetBackSolidWall(x, y, z) &&
-           !isJetOutflow(x, y, z);
+    return !isJetInlet(x, y, z) && !isJetBackSolidWall(x, y, z) && !isJetOutflow(x, y, z);
 }
 
 __device__ [[nodiscard]] static __forceinline__ uint8_t boundaryMask(
@@ -75,5 +73,6 @@ __device__ [[nodiscard]] static __forceinline__ uint8_t boundaryMask(
     {
         return OUTFLOW;
     }
+
     return BULK;
 }

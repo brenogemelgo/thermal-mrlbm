@@ -11,10 +11,11 @@ __device__ static __forceinline__ void copyAllMoments(
     const natural_t targetIdx,
     const natural_t sourceIdx) noexcept
 {
-    for (natural_t moment = 0; moment < NUM_MOMENTS; ++moment)
-    {
-        target[midx(targetIdx, moment)] = source[midx(sourceIdx, moment)];
-    }
+    constexpr_for<0, NUM_MOMENTS>(
+        [&](const auto moment) noexcept
+        {
+            target[midx(targetIdx, moment)] = source[midx(sourceIdx, moment)];
+        });
 }
 
 template <natural_t Q>

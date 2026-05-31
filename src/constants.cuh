@@ -115,7 +115,6 @@ constexpr natural_t MZZ = 6;
 constexpr natural_t MXY = 7;
 constexpr natural_t MXZ = 8;
 constexpr natural_t MYZ = 9;
-
 constexpr natural_t TEMP = 10;
 constexpr natural_t TFX = 11;
 constexpr natural_t TFY = 12;

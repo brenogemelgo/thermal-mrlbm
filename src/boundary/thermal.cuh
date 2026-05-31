@@ -71,43 +71,16 @@ __device__ static __forceinline__ void setJetInletMoments(
     real_t *__restrict__ moments,
     const natural_t idx) noexcept
 {
-    setStoredHydroEquilibriumMoments(
-        moments,
-        idx,
-        static_cast<real_t>(1),
-        static_cast<real_t>(0),
-        static_cast<real_t>(0),
-        static_cast<real_t>(U_CHAR));
-
-    setThermalEquilibriumMoments(
-        moments,
-        idx,
-        T_HOT,
-        static_cast<real_t>(1),
-        static_cast<real_t>(0),
-        static_cast<real_t>(0),
-        static_cast<real_t>(U_CHAR));
+    setStoredHydroEquilibriumMoments(moments, idx, static_cast<real_t>(1), static_cast<real_t>(0), static_cast<real_t>(0), static_cast<real_t>(U_CHAR));
+    setThermalEquilibriumMoments(moments, idx, T_HOT, static_cast<real_t>(1), static_cast<real_t>(0), static_cast<real_t>(0), static_cast<real_t>(U_CHAR));
 }
 
 __device__ static __forceinline__ void setJetAmbientMoments(
     real_t *__restrict__ moments,
     const natural_t idx) noexcept
 {
-    setStoredHydroEquilibriumMoments(
-        moments,
-        idx,
-        static_cast<real_t>(1),
-        static_cast<real_t>(0),
-        static_cast<real_t>(0),
-        static_cast<real_t>(0));
-
-    setThermalEquilibriumMoments(
-        moments,
-        idx,
-        T_COLD,
-        static_cast<real_t>(0),
-        static_cast<real_t>(0),
-        static_cast<real_t>(0));
+    setStoredHydroEquilibriumMoments(moments, idx, static_cast<real_t>(1), static_cast<real_t>(0), static_cast<real_t>(0), static_cast<real_t>(0));
+    setThermalEquilibriumMoments(moments, idx, T_COLD, static_cast<real_t>(0), static_cast<real_t>(0), static_cast<real_t>(0));
 }
 
 __device__ static __forceinline__ void setJetBedThermalMoments(
@@ -120,11 +93,5 @@ __device__ static __forceinline__ void setJetBedThermalMoments(
     const natural_t src = global3(x, y, 1);
     const real_t temperature = loadMoment(sourceMoments, src, TEMP);
 
-    setThermalEquilibriumMoments(
-        targetMoments,
-        idx,
-        temperature,
-        static_cast<real_t>(0),
-        static_cast<real_t>(0),
-        static_cast<real_t>(0));
+    setThermalEquilibriumMoments(targetMoments, idx, temperature, static_cast<real_t>(0), static_cast<real_t>(0), static_cast<real_t>(0));
 }

@@ -3,107 +3,54 @@
 #include "../D3Q7.cuh"
 #include "helpers.cuh"
 
-__device__ [[nodiscard]] static __forceinline__ bool isThermalHotLid(
-    const natural_t z) noexcept
+__device__ static __forceinline__ void setStoredHydroEquilibriumMoments(
+    real_t *__restrict__ moments,
+    const natural_t idx,
+    const real_t rho,
+    const real_t ux,
+    const real_t uy,
+    const real_t uz) noexcept
 {
-    return z == NZ - 1;
+    const real_t uxCoeff = ux * VelocitySet::scaleI();
+    const real_t uyCoeff = uy * VelocitySet::scaleI();
+    const real_t uzCoeff = uz * VelocitySet::scaleI();
+
+    moments[midx(idx, RHO)] = rho;
+    moments[midx(idx, UX)] = uxCoeff;
+    moments[midx(idx, UY)] = uyCoeff;
+    moments[midx(idx, UZ)] = uzCoeff;
+    moments[midx(idx, MXX)] = static_cast<real_t>(0.5) * uxCoeff * uxCoeff;
+    moments[midx(idx, MYY)] = static_cast<real_t>(0.5) * uyCoeff * uyCoeff;
+    moments[midx(idx, MZZ)] = static_cast<real_t>(0.5) * uzCoeff * uzCoeff;
+    moments[midx(idx, MXY)] = uxCoeff * uyCoeff;
+    moments[midx(idx, MXZ)] = uxCoeff * uzCoeff;
+    moments[midx(idx, MYZ)] = uyCoeff * uzCoeff;
 }
 
-__device__ [[nodiscard]] static __forceinline__ bool isThermalColdWall(
-    const natural_t z) noexcept
+__device__ static __forceinline__ void setStoredHydroMoments(
+    real_t *__restrict__ moments,
+    const natural_t idx,
+    const real_t rho,
+    const real_t ux,
+    const real_t uy,
+    const real_t uz,
+    const real_t mxx,
+    const real_t myy,
+    const real_t mzz,
+    const real_t mxy,
+    const real_t mxz,
+    const real_t myz) noexcept
 {
-    return z == 0;
-}
-
-__device__ [[nodiscard]] static __forceinline__ bool isThermalBoundary(
-    const natural_t x,
-    const natural_t y,
-    const natural_t z) noexcept
-{
-    return x == 0 || x == NX - 1 ||
-           y == 0 || y == NY - 1 ||
-           z == 0 || z == NZ - 1;
-}
-
-__device__ [[nodiscard]] static __forceinline__ bool isThermalDirichletWall(
-    const natural_t z) noexcept
-{
-    return isThermalHotLid(z) || isThermalColdWall(z);
-}
-
-__device__ [[nodiscard]] static __forceinline__ real_t thermalBoundaryTemperature(
-    const natural_t z) noexcept
-{
-    return isThermalHotLid(z) ? T_HOT : T_COLD;
-}
-
-__device__ static __forceinline__ void thermalWallVelocity(
-    const natural_t z,
-    real_t &ux,
-    real_t &uy,
-    real_t &uz) noexcept
-{
-    if (isThermalHotLid(z))
-    {
-        ux = U_CHAR;
-        uy = static_cast<real_t>(0);
-        uz = static_cast<real_t>(0);
-    }
-    else
-    {
-        ux = static_cast<real_t>(0);
-        uy = static_cast<real_t>(0);
-        uz = static_cast<real_t>(0);
-    }
-}
-
-__device__ static __forceinline__ void nearestThermalInteriorNode(
-    const natural_t x,
-    const natural_t y,
-    const natural_t z,
-    natural_t &xi,
-    natural_t &yi,
-    natural_t &zi) noexcept
-{
-    xi = x;
-    yi = y;
-    zi = z;
-
-    if constexpr (NX > 1)
-    {
-        if (x == 0)
-        {
-            xi = 1;
-        }
-        else if (x == NX - 1)
-        {
-            xi = NX - 2;
-        }
-    }
-
-    if constexpr (NY > 1)
-    {
-        if (y == 0)
-        {
-            yi = 1;
-        }
-        else if (y == NY - 1)
-        {
-            yi = NY - 2;
-        }
-    }
-
-    if constexpr (NZ > 1)
-    {
-        if (z == 0)
-        {
-            zi = 1;
-        }
-        else if (z == NZ - 1)
-        {
-            zi = NZ - 2;
-        }
-    }
+    moments[midx(idx, RHO)] = rho;
+    moments[midx(idx, UX)] = ux * VelocitySet::scaleI();
+    moments[midx(idx, UY)] = uy * VelocitySet::scaleI();
+    moments[midx(idx, UZ)] = uz * VelocitySet::scaleI();
+    moments[midx(idx, MXX)] = mxx * VelocitySet::scaleII();
+    moments[midx(idx, MYY)] = myy * VelocitySet::scaleII();
+    moments[midx(idx, MZZ)] = mzz * VelocitySet::scaleII();
+    moments[midx(idx, MXY)] = mxy * VelocitySet::scaleIJ();
+    moments[midx(idx, MXZ)] = mxz * VelocitySet::scaleIJ();
+    moments[midx(idx, MYZ)] = myz * VelocitySet::scaleIJ();
 }
 
 __device__ static __forceinline__ void setThermalEquilibriumMoments(
@@ -122,37 +69,62 @@ __device__ static __forceinline__ void setThermalEquilibriumMoments(
     moments[midx(idx, TFZ)] = temperature * uz * invCs2;
 }
 
-__device__ [[nodiscard]] static __forceinline__ bool applyThermalBoundary(
-    const real_t *__restrict__ moments,
-    real_t *__restrict__ output,
-    const natural_t x,
-    const natural_t y,
-    const natural_t z,
+__device__ static __forceinline__ void setJetInletMoments(
+    real_t *__restrict__ moments,
     const natural_t idx) noexcept
 {
-    if (!isThermalBoundary(x, y, z))
-    {
-        return false;
-    }
+    setStoredHydroEquilibriumMoments(
+        moments,
+        idx,
+        static_cast<real_t>(1),
+        JET_UX,
+        JET_UY,
+        JET_UZ);
+    setThermalEquilibriumMoments(
+        moments,
+        idx,
+        JET_TEMPERATURE,
+        JET_UX,
+        JET_UY,
+        JET_UZ);
+}
 
-    real_t temperature;
-    if (isThermalDirichletWall(z))
-    {
-        temperature = thermalBoundaryTemperature(z);
-    }
-    else
-    {
-        natural_t xi;
-        natural_t yi;
-        natural_t zi;
-        nearestThermalInteriorNode(x, y, z, xi, yi, zi);
-        temperature = loadMoment(moments, global3(xi, yi, zi), TEMP);
-    }
+__device__ static __forceinline__ void setJetAmbientMoments(
+    real_t *__restrict__ moments,
+    const natural_t idx) noexcept
+{
+    setStoredHydroEquilibriumMoments(
+        moments,
+        idx,
+        static_cast<real_t>(1),
+        static_cast<real_t>(0),
+        static_cast<real_t>(0),
+        static_cast<real_t>(0));
+    setThermalEquilibriumMoments(
+        moments,
+        idx,
+        AMBIENT_TEMPERATURE,
+        static_cast<real_t>(0),
+        static_cast<real_t>(0),
+        static_cast<real_t>(0));
+}
 
-    real_t uxWall;
-    real_t uyWall;
-    real_t uzWall;
-    thermalWallVelocity(z, uxWall, uyWall, uzWall);
-    setThermalEquilibriumMoments(output, idx, temperature, uxWall, uyWall, uzWall);
-    return true;
+__device__ static __forceinline__ void setJetBedThermalMoments(
+    const real_t *__restrict__ sourceMoments,
+    real_t *__restrict__ targetMoments,
+    const natural_t x,
+    const natural_t y,
+    const natural_t idx) noexcept
+{
+    // The subsea bed is a solid wall. Its scalar value uses a zero-normal-gradient
+    // copy from the adjacent fluid plane, with no wall advection.
+    const natural_t src = global3(x, y, 1);
+    const real_t temperature = loadMoment(sourceMoments, src, TEMP);
+    setThermalEquilibriumMoments(
+        targetMoments,
+        idx,
+        temperature,
+        static_cast<real_t>(0),
+        static_cast<real_t>(0),
+        static_cast<real_t>(0));
 }

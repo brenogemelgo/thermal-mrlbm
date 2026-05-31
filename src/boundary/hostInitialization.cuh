@@ -7,16 +7,7 @@
 template <unsigned int nodeTypeValue>
 __host__ [[nodiscard]] static inline constexpr bool isValidBoundaryTypeConst() noexcept
 {
-    if constexpr (nodeTypeValue == BULK)
-    {
-        return false;
-    }
-    else
-    {
-        return !(((nodeTypeValue & WEST) != 0u && (nodeTypeValue & EAST) != 0u) ||
-                 ((nodeTypeValue & SOUTH) != 0u && (nodeTypeValue & NORTH) != 0u) ||
-                 ((nodeTypeValue & BACK) != 0u && (nodeTypeValue & FRONT) != 0u));
-    }
+    return nodeTypeValue == WALL;
 }
 
 __host__ static inline void boundaryVelocityHost(
@@ -25,18 +16,10 @@ __host__ static inline void boundaryVelocityHost(
     real_t &uby,
     real_t &ubz) noexcept
 {
-    if ((nodeType & FRONT) == FRONT)
-    {
-        ubx = U_CHAR;
-        uby = static_cast<real_t>(0);
-        ubz = static_cast<real_t>(0);
-    }
-    else
-    {
-        ubx = static_cast<real_t>(0);
-        uby = static_cast<real_t>(0);
-        ubz = static_cast<real_t>(0);
-    }
+    (void)nodeType;
+    ubx = static_cast<real_t>(0);
+    uby = static_cast<real_t>(0);
+    ubz = static_cast<real_t>(0);
 }
 
 __host__ static inline void invertIRBCMatrix(

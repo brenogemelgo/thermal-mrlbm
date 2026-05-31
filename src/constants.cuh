@@ -31,161 +31,139 @@ using real_t = float;
 // =================================================================================================== //
 // USER PARAMETERS
 
-// --------------------------------------------------------------------------------------------------- //
-// Hydro/reference scales
+#define NX_VALUE 128
+#define NY_VALUE 128
+#define NZ_VALUE 512
 
-#ifndef L_CHAR_VALUE
-#define L_CHAR_VALUE 256
-#endif
+#define REYNOLDS_VALUE 1000
+#define JET_VELOCITY_VALUE 0.05
+#define JET_DIAMETER_VALUE 24
 
-#ifndef U_CHAR_VALUE
-#define U_CHAR_VALUE 0.05
-#endif
+#define NSTEPS_VALUE 100000
+#define STAMP_VALUE 1000
 
-#ifndef REYNOLDS_VALUE
-#define REYNOLDS_VALUE 10000
-#endif
+#define BULK_RELAXATION_FACTOR_VALUE 0.75
 
-#ifndef NSTEPS_VALUE
-#define NSTEPS_VALUE 500000
-#endif
-
-#ifndef STAMP_VALUE
-#define STAMP_VALUE 10000
-#endif
-
-// --------------------------------------------------------------------------------------------------- //
-// Hydrodynamic two-relaxation-time split
-//
-// BULK_RELAXATION_FACTOR_VALUE = 1.0 gives tau_bulk = tau_nu, i.e. BGK-equivalent trace relaxation.
-// BULK_RELAXATION_FACTOR_VALUE > 1.0 relaxes the bulk/trace mode more slowly.
-// BULK_RELAXATION_FACTOR_VALUE < 1.0 relaxes the bulk/trace mode faster, but must keep tau_bulk > 0.5.
-
-#ifndef BULK_RELAXATION_FACTOR_VALUE
-#define BULK_RELAXATION_FACTOR_VALUE 1.0
-#endif
-
-// --------------------------------------------------------------------------------------------------- //
-// Thermal physical/numerical parameters
-
-#ifndef PRANDTL_VALUE
 #define PRANDTL_VALUE 0.71
-#endif
 
-#ifndef T_COLD_VALUE
 #define T_COLD_VALUE 0.0
-#endif
-
-#ifndef T_HOT_VALUE
 #define T_HOT_VALUE 1.0
-#endif
-
-#ifndef T_REF_VALUE
 #define T_REF_VALUE 0.5
-#endif
 
-#ifndef BETA_THERMAL_VALUE
-#define BETA_THERMAL_VALUE 1.0
-#endif
-
-#ifndef THERMAL_SOURCE_VALUE_PARAM
+#define BETA_THERMAL_VALUE 0.1
 #define THERMAL_SOURCE_VALUE_PARAM 0.0
-#endif
 
-#ifndef THERMAL_GRAVITY_X_VALUE
 #define THERMAL_GRAVITY_X_VALUE 0.0
-#endif
-
-#ifndef THERMAL_GRAVITY_Y_VALUE
 #define THERMAL_GRAVITY_Y_VALUE 0.0
-#endif
+#define THERMAL_GRAVITY_Z_VALUE 1.0
 
-#ifndef THERMAL_GRAVITY_Z_VALUE
-#define THERMAL_GRAVITY_Z_VALUE -1.0
-#endif
-
-#ifndef THERMAL_RHO0_VALUE
 #define THERMAL_RHO0_VALUE 1.0
-#endif
-
-// D3Q7 thermal lattice convention:
-// w0 = 1/4, waxis = 1/8, therefore c_sT^2 = 1/4.
-#ifndef THERMAL_CS2_VALUE
 #define THERMAL_CS2_VALUE 0.25
-#endif
 
-// --------------------------------------------------------------------------------------------------- //
-// CUDA launch geometry
+#define JET_UX_VALUE 0.0
+#define JET_UY_VALUE 0.0
+#define JET_UZ_VALUE JET_VELOCITY_VALUE
 
-#ifndef BLOCK_NX_VALUE
+#define JET_TEMPERATURE_VALUE T_HOT_VALUE
+#define AMBIENT_TEMPERATURE_VALUE T_COLD_VALUE
+
 #define BLOCK_NX_VALUE 32
-#endif
-
-#ifndef BLOCK_NY_VALUE
 #define BLOCK_NY_VALUE 4
-#endif
-
-#ifndef BLOCK_NZ_VALUE
 #define BLOCK_NZ_VALUE 4
-#endif
 
 // =================================================================================================== //
-// Typed constants
+// Domain
 
-constexpr natural_t L_CHAR = static_cast<natural_t>(L_CHAR_VALUE);
-constexpr real_t U_CHAR = static_cast<real_t>(U_CHAR_VALUE);
+constexpr natural_t NX = static_cast<natural_t>(NX_VALUE);
+constexpr natural_t NY = static_cast<natural_t>(NY_VALUE);
+constexpr natural_t NZ = static_cast<natural_t>(NZ_VALUE);
+
+constexpr natural_t CELLS = NX * NY * NZ;
+constexpr natural_t STRIDE = NX * NY;
+
+// =================================================================================================== //
+// Jet parameters
+
 constexpr real_t REYNOLDS = static_cast<real_t>(REYNOLDS_VALUE);
+
+constexpr real_t JET_VELOCITY = static_cast<real_t>(JET_VELOCITY_VALUE);
+constexpr real_t JET_DIAMETER = static_cast<real_t>(JET_DIAMETER_VALUE);
+constexpr real_t JET_RADIUS = static_cast<real_t>(0.5) * JET_DIAMETER;
+
+constexpr real_t JET_UX = static_cast<real_t>(JET_UX_VALUE);
+constexpr real_t JET_UY = static_cast<real_t>(JET_UY_VALUE);
+constexpr real_t JET_UZ = static_cast<real_t>(JET_UZ_VALUE);
+
+constexpr real_t JET_TEMPERATURE = static_cast<real_t>(JET_TEMPERATURE_VALUE);
+constexpr real_t AMBIENT_TEMPERATURE = static_cast<real_t>(AMBIENT_TEMPERATURE_VALUE);
+
 constexpr natural_t NSTEPS = static_cast<natural_t>(NSTEPS_VALUE);
 constexpr natural_t STAMP = static_cast<natural_t>(STAMP_VALUE);
+
+constexpr real_t U_CHAR = JET_VELOCITY;
 
 // =================================================================================================== //
 // Hydrodynamic relaxation
 
-constexpr real_t VISCOSITY = static_cast<real_t>((static_cast<double>(U_CHAR) * static_cast<double>(L_CHAR)) / static_cast<double>(REYNOLDS));
+constexpr real_t VISCOSITY = static_cast<real_t>(
+    (static_cast<double>(JET_VELOCITY) * static_cast<double>(JET_DIAMETER)) /
+    static_cast<double>(REYNOLDS));
+
 constexpr real_t TAU_NU = static_cast<real_t>(0.5) + static_cast<real_t>(3.0) * VISCOSITY;
+
 constexpr real_t TAU = TAU_NU;
 constexpr real_t OMEGA = static_cast<real_t>(static_cast<double>(1) / static_cast<double>(TAU));
 constexpr real_t T_OMEGA = static_cast<real_t>(1.0) - OMEGA;
 constexpr real_t OMEGA_D2 = static_cast<real_t>(0.5) * OMEGA;
 
 constexpr real_t BULK_RELAXATION_FACTOR = static_cast<real_t>(BULK_RELAXATION_FACTOR_VALUE);
-constexpr real_t TAU_BULK = static_cast<real_t>(0.5) + BULK_RELAXATION_FACTOR * (TAU_NU - static_cast<real_t>(0.5));
-constexpr real_t OMEGA_BULK = static_cast<real_t>(static_cast<double>(1) / static_cast<double>(TAU_BULK));
+
+constexpr real_t TAU_BULK =
+    static_cast<real_t>(0.5) +
+    BULK_RELAXATION_FACTOR * (TAU_NU - static_cast<real_t>(0.5));
+
+constexpr real_t OMEGA_BULK = static_cast<real_t>(
+    static_cast<double>(1) / static_cast<double>(TAU_BULK));
+
 constexpr real_t T_OMEGA_BULK = static_cast<real_t>(1.0) - OMEGA_BULK;
 
 // =================================================================================================== //
 // Thermal parameters
 
 constexpr real_t PRANDTL = static_cast<real_t>(PRANDTL_VALUE);
+
 constexpr real_t T_COLD = static_cast<real_t>(T_COLD_VALUE);
 constexpr real_t T_HOT = static_cast<real_t>(T_HOT_VALUE);
 constexpr real_t T_REF = static_cast<real_t>(T_REF_VALUE);
+
 constexpr real_t BETA_THERMAL = static_cast<real_t>(BETA_THERMAL_VALUE);
 constexpr real_t THERMAL_SOURCE_VALUE = static_cast<real_t>(THERMAL_SOURCE_VALUE_PARAM);
+
 constexpr real_t THERMAL_GRAVITY_X = static_cast<real_t>(THERMAL_GRAVITY_X_VALUE);
 constexpr real_t THERMAL_GRAVITY_Y = static_cast<real_t>(THERMAL_GRAVITY_Y_VALUE);
 constexpr real_t THERMAL_GRAVITY_Z = static_cast<real_t>(THERMAL_GRAVITY_Z_VALUE);
+
 constexpr real_t THERMAL_RHO0 = static_cast<real_t>(THERMAL_RHO0_VALUE);
 constexpr real_t THERMAL_CS2 = static_cast<real_t>(THERMAL_CS2_VALUE);
 
-constexpr real_t THERMAL_FORCE_SCALE =
-    static_cast<real_t>((static_cast<double>(U_CHAR) * static_cast<double>(U_CHAR)) /
-                        static_cast<double>(L_CHAR));
+constexpr real_t THERMAL_FORCE_SCALE = static_cast<real_t>(
+    (static_cast<double>(JET_VELOCITY) * static_cast<double>(JET_VELOCITY)) /
+    static_cast<double>(JET_DIAMETER));
 
 constexpr real_t THERMAL_DIFFUSIVITY = VISCOSITY / PRANDTL;
-constexpr real_t TAU_T = static_cast<real_t>(0.5) + THERMAL_DIFFUSIVITY / THERMAL_CS2;
-constexpr real_t OMEGA_T = static_cast<real_t>(static_cast<double>(1) / static_cast<double>(TAU_T));
+
+constexpr real_t TAU_T =
+    static_cast<real_t>(0.5) + THERMAL_DIFFUSIVITY / THERMAL_CS2;
+
+constexpr real_t OMEGA_T = static_cast<real_t>(
+    static_cast<double>(1) / static_cast<double>(TAU_T));
+
 constexpr real_t T_OMEGA_T = static_cast<real_t>(1.0) - OMEGA_T;
 
 // =================================================================================================== //
-// Domain
+// Derived jet diagnostics
 
-constexpr natural_t NX = L_CHAR;
-constexpr natural_t NY = L_CHAR;
-constexpr natural_t NZ = L_CHAR;
-
-constexpr natural_t CELLS = NX * NY * NZ;
-constexpr natural_t STRIDE = NX * NY;
+constexpr real_t RE_JET = JET_UZ * JET_DIAMETER / VISCOSITY;
 
 // =================================================================================================== //
 // CUDA launch geometry
@@ -202,12 +180,7 @@ constexpr natural_t GRID_Z = (NZ + BLOCK_NZ - 1) / BLOCK_NZ;
 // Moment layout
 
 constexpr natural_t HYDRO_MOMENTS = 10;
-
-// Thermal MR storage:
-// TEMP, TFX, TFY, TFZ.
-// D3Q7 populations are reconstructed locally, not stored.
 constexpr natural_t THERMAL_MOMENTS = 4;
-
 constexpr natural_t NUM_MOMENTS = HYDRO_MOMENTS + THERMAL_MOMENTS;
 
 // =================================================================================================== //
@@ -231,11 +204,18 @@ constexpr natural_t TFY = 12;
 constexpr natural_t TFZ = 13;
 
 // =================================================================================================== //
-// Compile-time sanity checks
+// Sanity checks
 
-static_assert(L_CHAR > 0, "L_CHAR must be positive.");
-static_assert(U_CHAR > static_cast<real_t>(0), "U_CHAR must be positive.");
+static_assert(NX > 2, "NX must be larger than 2.");
+static_assert(NY > 2, "NY must be larger than 2.");
+static_assert(NZ > 2, "NZ must be larger than 2.");
+
 static_assert(REYNOLDS > static_cast<real_t>(0), "REYNOLDS must be positive.");
+static_assert(JET_VELOCITY > static_cast<real_t>(0), "JET_VELOCITY must be positive.");
+static_assert(JET_DIAMETER > static_cast<real_t>(0), "JET_DIAMETER must be positive.");
+static_assert(JET_DIAMETER < static_cast<real_t>(NX), "JET_DIAMETER must be smaller than NX.");
+static_assert(JET_DIAMETER < static_cast<real_t>(NY), "JET_DIAMETER must be smaller than NY.");
+
 static_assert(PRANDTL > static_cast<real_t>(0), "PRANDTL must be positive.");
 
 static_assert(TAU_NU > static_cast<real_t>(0.5), "TAU_NU must be larger than 0.5.");

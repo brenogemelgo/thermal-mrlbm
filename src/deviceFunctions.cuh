@@ -21,6 +21,27 @@ __device__ __host__ [[nodiscard]] static __forceinline__ natural_t midx(
     return idx + CELLS * moment;
 }
 
+__device__ [[nodiscard]] static __forceinline__ natural_t jetPullNeighborIndex(
+    const natural_t x,
+    const natural_t y,
+    const natural_t z,
+    const int cx,
+    const int cy,
+    const int cz) noexcept
+{
+    int xs = static_cast<int>(x) - cx;
+    int ys = static_cast<int>(y) - cy;
+    const int zs = static_cast<int>(z) - cz;
+
+    xs = (xs + static_cast<int>(NX)) % static_cast<int>(NX);
+    ys = (ys + static_cast<int>(NY)) % static_cast<int>(NY);
+
+    return global3(
+        static_cast<natural_t>(xs),
+        static_cast<natural_t>(ys),
+        static_cast<natural_t>(zs));
+}
+
 __device__ static __forceinline__ real_t fma_rn(real_t a, real_t b, real_t c)
 {
     if constexpr (std::is_same_v<real_t, float>)

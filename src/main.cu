@@ -1,7 +1,6 @@
 #include "boundary/hostInitialization.cuh"
 #include "initialConditions.cuh"
 #include "kernel.cuh"
-#include "ldcProfiles.cuh"
 #include "output.cuh"
 
 // #define BENCHMARK
@@ -97,10 +96,6 @@ int main(int argc, char **argv)
     CUDA_CHECK(cudaFuncSetCacheConfig(collide, cudaFuncCachePreferL1));
     CUDA_CHECK(initIRBCBoundaryTables());
 
-#ifndef BENCHMARK
-    LdcProfileSamples ldcProfiles;
-#endif
-
     natural_t startStep = 0;
     if (continueFromCheckpoint)
     {
@@ -108,16 +103,10 @@ int main(int argc, char **argv)
     }
     else
     {
-        cavityInit<<<grid, block>>>(moments, dbuffer);
-        CUDA_CHECK(cudaGetLastError());
-        thermalCavityInit<<<grid, block>>>(moments, dbuffer);
+        jetInit<<<grid, block>>>(moments, dbuffer);
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
     }
-
-#ifndef BENCHMARK
-    CUDA_CHECK(initLdcProfileSamples(ldcProfiles, getSimulationOutputDirectory(), continueFromCheckpoint));
-#endif
 
     std::cout << std::endl;
     if (continueFromCheckpoint)
@@ -129,6 +118,7 @@ int main(int argc, char **argv)
         std::cout << "simulation start" << std::endl;
     }
     std::cout << "case id: " << caseId << std::endl;
+    std::cout << "case = thermal round jet" << std::endl;
     std::cout << "output: " << getSimulationOutputDirectory() << std::endl;
     if (!validateThermalVelocitySetMoments())
     {
@@ -136,20 +126,40 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
+    std::cout << "domain: NX=" << NX << ", NY=" << NY << ", NZ=" << NZ << std::endl;
+    std::cout << "U_CHAR=" << static_cast<double>(U_CHAR)
+              << ", viscosity=" << static_cast<double>(VISCOSITY)
+              << ", Reynolds_input=" << static_cast<double>(REYNOLDS)
+              << std::endl;
+    std::cout << "jet: diameter=" << static_cast<double>(JET_DIAMETER)
+              << ", radius=" << static_cast<double>(JET_RADIUS)
+              << ", velocity=(" << static_cast<double>(JET_UX)
+              << ',' << static_cast<double>(JET_UY)
+              << ',' << static_cast<double>(JET_UZ)
+              << "), temperature=" << static_cast<double>(JET_TEMPERATURE)
+              << ", ambientTemperature=" << static_cast<double>(AMBIENT_TEMPERATURE)
+              << ", Re_jet=" << static_cast<double>(RE_JET)
+              << std::endl;
     std::cout << "thermal: Pr=" << static_cast<double>(PRANDTL)
               << ", chi=" << static_cast<double>(THERMAL_DIFFUSIVITY)
+              << ", tauNu=" << static_cast<double>(TAU_NU)
+              << ", tauBulk=" << static_cast<double>(TAU_BULK)
               << ", tauT=" << static_cast<double>(TAU_T)
+              << ", T_COLD=" << static_cast<double>(T_COLD)
+              << ", T_HOT=" << static_cast<double>(T_HOT)
               << ", beta=" << static_cast<double>(BETA_THERMAL)
-              << ", gravity=(" << static_cast<double>(THERMAL_GRAVITY_X)
-              << ',' << static_cast<double>(THERMAL_GRAVITY_Y)
-              << ',' << static_cast<double>(THERMAL_GRAVITY_Z)
-              << "), forceScale=" << static_cast<double>(THERMAL_FORCE_SCALE)
+              << ", forceScale=" << static_cast<double>(THERMAL_FORCE_SCALE)
               << ", source=" << static_cast<double>(THERMAL_SOURCE_VALUE)
               << std::endl;
+    std::cout << "gravity=(" << static_cast<double>(THERMAL_GRAVITY_X)
+              << ',' << static_cast<double>(THERMAL_GRAVITY_Y)
+              << ',' << static_cast<double>(THERMAL_GRAVITY_Z)
+              << ')' << std::endl;
+    std::cout << "boundary summary:" << std::endl;
+    std::cout << "  z=0 binary circular inlet + solid bed" << std::endl;
+    std::cout << "  x/y periodic" << std::endl;
+    std::cout << "  z=NZ-1 copy outflow" << std::endl;
     printThermalDiagnosticsHeader();
-#ifndef BENCHMARK
-    std::cout << "LDC profile samples: every timestep" << std::endl;
-#endif
     const auto start = std::chrono::high_resolution_clock::now();
 #ifndef BENCHMARK
     auto lastStamp = start;
@@ -162,8 +172,6 @@ int main(int argc, char **argv)
         collide<<<grid, block>>>(moments, dbuffer);
 
 #ifndef BENCHMARK
-        CUDA_CHECK(writeLdcProfileSample(ldcProfiles, moments, t + 1));
-
         if ((t + 1) % STAMP == 0)
         {
             CUDA_CHECK(cudaDeviceSynchronize());
@@ -198,11 +206,6 @@ int main(int argc, char **argv)
     std::cout << std::endl;
     std::cout << "elapsed: " << elapsed.count() << " s" << std::endl;
     std::cout << "MLUPS: " << mlups << std::endl;
-
-#ifndef BENCHMARK
-    writeLdcProfileSamples(ldcProfiles, getSimulationOutputDirectory());
-    CUDA_CHECK(destroyLdcProfileSamples(ldcProfiles));
-#endif
 
     CUDA_CHECK(cudaFree(momentsAlloc));
     CUDA_CHECK(cudaFree(dbufferAlloc));

@@ -323,11 +323,33 @@ struct ThermalDiagnostics
     double minTemperature = 0.0;
     double maxTemperature = 0.0;
     double sumTemperature = 0.0;
+    double minDensity = 0.0;
+    double maxDensity = 0.0;
     double maxVelocity = 0.0;
+    double maxAxialVelocity = 0.0;
     double maxHydroForce = 0.0;
+    double inletMassFlux = 0.0;
+    double inletThermalFlux = 0.0;
     natural_t nonFiniteTemperatureCells = 0;
     natural_t nonFiniteVelocityCells = 0;
 };
+
+static inline bool isJetInletHost(
+    const natural_t x,
+    const natural_t y,
+    const natural_t z)
+{
+    if (z != 0)
+    {
+        return false;
+    }
+
+    const double cx0 = 0.5 * static_cast<double>(NX - 1);
+    const double cy0 = 0.5 * static_cast<double>(NY - 1);
+    const double dx = static_cast<double>(x) - cx0;
+    const double dy = static_cast<double>(y) - cy0;
+    return dx * dx + dy * dy <= static_cast<double>(JET_RADIUS) * static_cast<double>(JET_RADIUS);
+}
 
 static inline void copyTemperatureToHost(
     const real_t *deviceMoments,
@@ -348,6 +370,9 @@ static inline ThermalDiagnostics computeThermalDiagnostics(
     ThermalDiagnostics diagnostics;
     diagnostics.minTemperature = std::numeric_limits<double>::infinity();
     diagnostics.maxTemperature = -std::numeric_limits<double>::infinity();
+    diagnostics.minDensity = std::numeric_limits<double>::infinity();
+    diagnostics.maxDensity = -std::numeric_limits<double>::infinity();
+    diagnostics.maxAxialVelocity = -std::numeric_limits<double>::infinity();
 
     for (const real_t value : temperature)
     {
@@ -381,10 +406,14 @@ static inline ThermalDiagnostics computeThermalDiagnostics(
         diagnostics.maxHydroForce = std::max(diagnostics.maxHydroForce, forceNorm);
     }
 
+    std::vector<real_t> rho(CELLS);
     std::vector<real_t> ux(CELLS);
     std::vector<real_t> uy(CELLS);
     std::vector<real_t> uz(CELLS);
 
+    outputCheckCuda(
+        cudaMemcpy(rho.data(), deviceMoments + CELLS * RHO, CELLS * sizeof(real_t), cudaMemcpyDeviceToHost),
+        "cudaMemcpy rho diagnostics");
     outputCheckCuda(
         cudaMemcpy(ux.data(), deviceMoments + CELLS * UX, CELLS * sizeof(real_t), cudaMemcpyDeviceToHost),
         "cudaMemcpy ux diagnostics");
@@ -398,6 +427,13 @@ static inline ThermalDiagnostics computeThermalDiagnostics(
     const double invScaleI = 1.0 / static_cast<double>(VelocitySet::scaleI());
     for (natural_t idx = 0; idx < CELLS; ++idx)
     {
+        const double density = static_cast<double>(rho[idx]);
+        if (std::isfinite(density))
+        {
+            diagnostics.minDensity = std::min(diagnostics.minDensity, density);
+            diagnostics.maxDensity = std::max(diagnostics.maxDensity, density);
+        }
+
         const double vx = static_cast<double>(ux[idx]) * invScaleI;
         const double vy = static_cast<double>(uy[idx]) * invScaleI;
         const double vz = static_cast<double>(uz[idx]) * invScaleI;
@@ -408,6 +444,20 @@ static inline ThermalDiagnostics computeThermalDiagnostics(
         }
 
         diagnostics.maxVelocity = std::max(diagnostics.maxVelocity, std::sqrt(vx * vx + vy * vy + vz * vz));
+        diagnostics.maxAxialVelocity = std::max(diagnostics.maxAxialVelocity, vz);
+
+        const natural_t z = idx / STRIDE;
+        const natural_t rem = idx - z * STRIDE;
+        const natural_t y = rem / NX;
+        const natural_t x = rem - y * NX;
+        const double temperatureValue = static_cast<double>(temperature[idx]);
+        if (isJetInletHost(x, y, z) &&
+            std::isfinite(density) &&
+            std::isfinite(temperatureValue))
+        {
+            diagnostics.inletMassFlux += density * vz;
+            diagnostics.inletThermalFlux += temperatureValue * vz;
+        }
     }
 
     if (diagnostics.nonFiniteTemperatureCells == CELLS)
@@ -416,6 +466,15 @@ static inline ThermalDiagnostics computeThermalDiagnostics(
         diagnostics.maxTemperature = std::numeric_limits<double>::quiet_NaN();
         diagnostics.sumTemperature = std::numeric_limits<double>::quiet_NaN();
         diagnostics.maxHydroForce = std::numeric_limits<double>::quiet_NaN();
+    }
+    if (!std::isfinite(diagnostics.minDensity))
+    {
+        diagnostics.minDensity = std::numeric_limits<double>::quiet_NaN();
+        diagnostics.maxDensity = std::numeric_limits<double>::quiet_NaN();
+    }
+    if (!std::isfinite(diagnostics.maxAxialVelocity))
+    {
+        diagnostics.maxAxialVelocity = std::numeric_limits<double>::quiet_NaN();
     }
 
     return diagnostics;
@@ -464,7 +523,7 @@ static inline bool validateThermalVelocitySetMoments()
 static inline void printThermalDiagnosticsHeader()
 {
     std::cout << "thermal diagnostics:" << std::endl;
-    std::cout << "step,minT,maxT,sumT,maxU,tauNu,tauBulk,tauT,chi,Pr,hydroForceMax,badT,badU" << std::endl;
+    std::cout << "step,minT,maxT,sumT,minRho,maxRho,maxU,maxUz,hydroForceMax,badT,badU,inletMassFlux,inletThermalFlux" << std::endl;
 }
 
 static inline void printThermalDiagnosticsLine(
@@ -476,15 +535,15 @@ static inline void printThermalDiagnosticsLine(
               << diagnostics.minTemperature << ','
               << diagnostics.maxTemperature << ','
               << diagnostics.sumTemperature << ','
+              << diagnostics.minDensity << ','
+              << diagnostics.maxDensity << ','
               << diagnostics.maxVelocity << ','
-              << static_cast<double>(TAU_NU) << ','
-              << static_cast<double>(TAU_BULK) << ','
-              << static_cast<double>(TAU_T) << ','
-              << static_cast<double>(THERMAL_DIFFUSIVITY) << ','
-              << static_cast<double>(PRANDTL) << ','
+              << diagnostics.maxAxialVelocity << ','
               << diagnostics.maxHydroForce << ','
               << diagnostics.nonFiniteTemperatureCells << ','
-              << diagnostics.nonFiniteVelocityCells << std::endl;
+              << diagnostics.nonFiniteVelocityCells << ','
+              << diagnostics.inletMassFlux << ','
+              << diagnostics.inletThermalFlux << std::endl;
 }
 
 static inline void writeOutput(

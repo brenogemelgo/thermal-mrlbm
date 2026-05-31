@@ -15,9 +15,7 @@ __device__ [[nodiscard]] static __forceinline__ real_t reconstructPopulation(
     constexpr int cy = VelocitySet::cy<Q>();
     constexpr int cz = VelocitySet::cz<Q>();
 
-    const natural_t src = global3(static_cast<natural_t>(static_cast<int>(x) - cx),
-                                  static_cast<natural_t>(static_cast<int>(y) - cy),
-                                  static_cast<natural_t>(static_cast<int>(z) - cz));
+    const natural_t src = jetPullNeighborIndex(x, y, z, cx, cy, cz);
 
     const real_t cu = static_cast<real_t>(cx) * loadMoment(moments, src, UX) +
                       static_cast<real_t>(cy) * loadMoment(moments, src, UY) +
@@ -42,18 +40,9 @@ __device__ static __forceinline__ void boundaryVelocityConst(
     real_t &uby,
     real_t &ubz) noexcept
 {
-    if constexpr ((nodeTypeValue & FRONT) == FRONT)
-    {
-        ubx = U_CHAR;
-        uby = static_cast<real_t>(0);
-        ubz = static_cast<real_t>(0);
-    }
-    else
-    {
-        ubx = static_cast<real_t>(0);
-        uby = static_cast<real_t>(0);
-        ubz = static_cast<real_t>(0);
-    }
+    ubx = static_cast<real_t>(0);
+    uby = static_cast<real_t>(0);
+    ubz = static_cast<real_t>(0);
 }
 
 // ===================================================================================================================== //
@@ -159,90 +148,9 @@ __device__ static __forceinline__ void dispatchIRBCBoundary(
 {
     switch (nodeType)
     {
-    case WEST_FACE:
-        applyIRBCBoundaryTyped<WEST_FACE>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-    case EAST_FACE:
-        applyIRBCBoundaryTyped<EAST_FACE>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-    case SOUTH_FACE:
-        applyIRBCBoundaryTyped<SOUTH_FACE>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-    case NORTH_FACE:
-        applyIRBCBoundaryTyped<NORTH_FACE>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-    case BACK_FACE:
+    case WALL:
         applyIRBCBoundaryTyped<BACK_FACE>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
         return;
-    case FRONT_FACE:
-        applyIRBCBoundaryTyped<FRONT_FACE>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-
-    case NORTH_WEST:
-        applyIRBCBoundaryTyped<NORTH_WEST>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-    case NORTH_EAST:
-        applyIRBCBoundaryTyped<NORTH_EAST>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-    case NORTH_FRONT:
-        applyIRBCBoundaryTyped<NORTH_FRONT>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-    case NORTH_BACK:
-        applyIRBCBoundaryTyped<NORTH_BACK>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-
-    case SOUTH_WEST:
-        applyIRBCBoundaryTyped<SOUTH_WEST>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-    case SOUTH_EAST:
-        applyIRBCBoundaryTyped<SOUTH_EAST>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-    case SOUTH_FRONT:
-        applyIRBCBoundaryTyped<SOUTH_FRONT>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-    case SOUTH_BACK:
-        applyIRBCBoundaryTyped<SOUTH_BACK>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-
-    case WEST_FRONT:
-        applyIRBCBoundaryTyped<WEST_FRONT>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-    case WEST_BACK:
-        applyIRBCBoundaryTyped<WEST_BACK>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-    case EAST_FRONT:
-        applyIRBCBoundaryTyped<EAST_FRONT>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-    case EAST_BACK:
-        applyIRBCBoundaryTyped<EAST_BACK>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-
-    case NORTH_WEST_FRONT:
-        applyIRBCBoundaryTyped<NORTH_WEST_FRONT>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-    case NORTH_WEST_BACK:
-        applyIRBCBoundaryTyped<NORTH_WEST_BACK>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-    case NORTH_EAST_FRONT:
-        applyIRBCBoundaryTyped<NORTH_EAST_FRONT>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-    case NORTH_EAST_BACK:
-        applyIRBCBoundaryTyped<NORTH_EAST_BACK>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-
-    case SOUTH_WEST_FRONT:
-        applyIRBCBoundaryTyped<SOUTH_WEST_FRONT>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-    case SOUTH_WEST_BACK:
-        applyIRBCBoundaryTyped<SOUTH_WEST_BACK>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-    case SOUTH_EAST_FRONT:
-        applyIRBCBoundaryTyped<SOUTH_EAST_FRONT>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-    case SOUTH_EAST_BACK:
-        applyIRBCBoundaryTyped<SOUTH_EAST_BACK>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        return;
-
     default:
         __builtin_unreachable();
     }

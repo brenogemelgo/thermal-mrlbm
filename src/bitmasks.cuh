@@ -27,7 +27,7 @@ __device__ [[nodiscard]] static __forceinline__ bool isJetInlet(
     const real_t dy = static_cast<real_t>(y) - cy0;
 
     const real_t r2 = dx * dx + dy * dy;
-    const real_t radius2 = JET_RADIUS * JET_RADIUS;
+    constexpr real_t radius2 = RADIUS * RADIUS;
 
     return r2 <= radius2;
 }

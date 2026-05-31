@@ -64,7 +64,7 @@ constexpr real_t THERMAL_GRAVITY_Z = static_cast<real_t>(1);
 
 constexpr natural_t CELLS = NX * NY * NZ;
 constexpr natural_t STRIDE = NX * NY;
-constexpr real_t JET_RADIUS = static_cast<real_t>(0.5) * JET_DIAMETER;
+constexpr real_t RADIUS = static_cast<real_t>(0.5) * L_CHAR;
 
 // =================================================================================================== //
 
@@ -75,7 +75,7 @@ constexpr real_t OMEGA_SHEAR = static_cast<real_t>(static_cast<double>(1) / stat
 constexpr real_t T_OMEGA_SHEAR = static_cast<real_t>(1.0) - OMEGA_SHEAR;
 constexpr real_t OMEGA_D2_SHEAR = static_cast<real_t>(0.5) * OMEGA_SHEAR;
 
-constexpr real_t TAU_BULK = static_cast<real_t>(0.5) + BULK_RELAXATION_FACTOR * (TAU_NU - static_cast<real_t>(0.5));
+constexpr real_t TAU_BULK = static_cast<real_t>(0.5) + BULK_RELAXATION_FACTOR * (TAU_SHEAR - static_cast<real_t>(0.5));
 constexpr real_t OMEGA_BULK = static_cast<real_t>(static_cast<double>(1) / static_cast<double>(TAU_BULK));
 constexpr real_t T_OMEGA_BULK = static_cast<real_t>(1.0) - OMEGA_BULK;
 
@@ -84,7 +84,7 @@ constexpr real_t T_OMEGA_BULK = static_cast<real_t>(1.0) - OMEGA_BULK;
 constexpr real_t THERMAL_FORCE_SCALE = static_cast<real_t>((static_cast<double>(U_CHAR) * static_cast<double>(U_CHAR)) / static_cast<double>(L_CHAR));
 constexpr real_t THERMAL_DIFFUSIVITY = VISCOSITY / PRANDTL;
 constexpr real_t TAU_THERMAL = static_cast<real_t>(0.5) + THERMAL_DIFFUSIVITY * static_cast<real_t>(4.0);
-constexpr real_t OMEGA_THERMAL = static_cast<real_t>(static_cast<double>(1) / static_cast<double>(TAU_T));
+constexpr real_t OMEGA_THERMAL = static_cast<real_t>(static_cast<double>(1) / static_cast<double>(TAU_THERMAL));
 constexpr real_t T_OMEGA_THERMAL = static_cast<real_t>(1.0) - OMEGA_THERMAL;
 
 // =================================================================================================== //

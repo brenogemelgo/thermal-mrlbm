@@ -344,11 +344,15 @@ static inline bool isJetInletHost(
         return false;
     }
 
-    const double cx0 = 0.5 * static_cast<double>(NX - 1);
-    const double cy0 = 0.5 * static_cast<double>(NY - 1);
+    constexpr double cx0 = 0.5 * static_cast<double>(NX - 1);
+    constexpr double cy0 = 0.5 * static_cast<double>(NY - 1);
+
+    constexpr double radius2 = static_cast<double>(RADIUS) * static_cast<double>(RADIUS);
+
     const double dx = static_cast<double>(x) - cx0;
     const double dy = static_cast<double>(y) - cy0;
-    return dx * dx + dy * dy <= static_cast<double>(JET_RADIUS) * static_cast<double>(JET_RADIUS);
+
+    return dx * dx + dy * dy <= radius2;
 }
 
 static inline void copyTemperatureToHost(

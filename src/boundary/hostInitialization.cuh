@@ -160,38 +160,38 @@ __host__ static inline void assembleIRBCInverse(
                 VelocitySet::w<Q>() *
                     (static_cast<real_t>(1) +
                      VelocitySet::as2() * cu +
-                     OMEGA * meqH),
+                     OMEGA_SHEAR * meqH),
 
                 VelocitySet::w<Q>() *
-                    T_OMEGA *
+                    T_OMEGA_SHEAR *
                     static_cast<real_t>(0.5) *
                     VelocitySet::as4() *
                     h[0],
 
                 VelocitySet::w<Q>() *
-                    T_OMEGA *
+                    T_OMEGA_SHEAR *
                     static_cast<real_t>(0.5) *
                     VelocitySet::as4() *
                     h[1],
 
                 VelocitySet::w<Q>() *
-                    T_OMEGA *
+                    T_OMEGA_SHEAR *
                     static_cast<real_t>(0.5) *
                     VelocitySet::as4() *
                     h[2],
 
                 VelocitySet::w<Q>() *
-                    T_OMEGA *
+                    T_OMEGA_SHEAR *
                     VelocitySet::as4() *
                     h[3],
 
                 VelocitySet::w<Q>() *
-                    T_OMEGA *
+                    T_OMEGA_SHEAR *
                     VelocitySet::as4() *
                     h[4],
 
                 VelocitySet::w<Q>() *
-                    T_OMEGA *
+                    T_OMEGA_SHEAR *
                     VelocitySet::as4() *
                     h[5]};
 

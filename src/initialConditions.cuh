@@ -1,6 +1,5 @@
 #pragma once
 
-#include "boundary/thermal.cuh"
 #include "deviceFunctions.cuh"
 
 __global__ void jetInit(

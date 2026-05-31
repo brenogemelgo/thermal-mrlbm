@@ -231,22 +231,7 @@ __global__ void stream(
 
     if (nodeType == WALL)
     {
-        dispatchIRBCBoundary(
-            moments,
-            x,
-            y,
-            z,
-            nodeType,
-            rho,
-            ux,
-            uy,
-            uz,
-            mxx,
-            myy,
-            mzz,
-            mxy,
-            mxz,
-            myz);
+        dispatchIRBCBoundary(moments, x, y, z, nodeType, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
 
         dbuffer[midx(idx, RHO)] = rho;
         dbuffer[midx(idx, UX)] = ux * VelocitySet::scaleI();
@@ -271,21 +256,7 @@ __global__ void stream(
     constexpr_for<0, VelocitySet::Q()>(
         [&](const auto Q) noexcept
         {
-            accumulateBulkDirection<Q>(
-                moments,
-                x,
-                y,
-                z,
-                rho,
-                ux,
-                uy,
-                uz,
-                mxx,
-                myy,
-                mzz,
-                mxy,
-                mxz,
-                myz);
+            accumulateBulkDirection<Q>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
         });
 
     const real_t invRho = static_cast<real_t>(1) / rho;

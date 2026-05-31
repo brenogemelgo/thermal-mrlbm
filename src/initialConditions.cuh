@@ -1,5 +1,7 @@
 #pragma once
 
+#include "D3Q7.cuh"
+#include "bitmasks.cuh"
 #include "deviceFunctions.cuh"
 
 __global__ void jetInit(
@@ -16,15 +18,27 @@ __global__ void jetInit(
     }
 
     const natural_t idx = global3(x, y, z);
+    const bool inlet = isJetInlet(x, y, z);
+    const real_t uxCoeff = static_cast<real_t>(0);
+    const real_t uyCoeff = static_cast<real_t>(0);
+    const real_t uzCoeff = inlet ? U_CHAR * VelocitySet::scaleI() : static_cast<real_t>(0);
+    const real_t temperature = inlet ? T_HOT : T_COLD;
+    const real_t invThermalCs2 = ThermalVelocitySet::as2();
 
-    if (isJetInlet(x, y, z))
-    {
-        setJetInletMoments(moments, idx);
-    }
-    else
-    {
-        setJetAmbientMoments(moments, idx);
-    }
+    moments[midx(idx, RHO)] = static_cast<real_t>(1);
+    moments[midx(idx, UX)] = uxCoeff;
+    moments[midx(idx, UY)] = uyCoeff;
+    moments[midx(idx, UZ)] = uzCoeff;
+    moments[midx(idx, MXX)] = static_cast<real_t>(0.5) * uxCoeff * uxCoeff;
+    moments[midx(idx, MYY)] = static_cast<real_t>(0.5) * uyCoeff * uyCoeff;
+    moments[midx(idx, MZZ)] = static_cast<real_t>(0.5) * uzCoeff * uzCoeff;
+    moments[midx(idx, MXY)] = uxCoeff * uyCoeff;
+    moments[midx(idx, MXZ)] = uxCoeff * uzCoeff;
+    moments[midx(idx, MYZ)] = uyCoeff * uzCoeff;
+    moments[midx(idx, TEMP)] = temperature;
+    moments[midx(idx, TFX)] = static_cast<real_t>(0);
+    moments[midx(idx, TFY)] = static_cast<real_t>(0);
+    moments[midx(idx, TFZ)] = inlet ? temperature * U_CHAR * invThermalCs2 : static_cast<real_t>(0);
 
     for (natural_t k = 0; k < NUM_MOMENTS; ++k)
     {

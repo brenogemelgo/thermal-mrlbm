@@ -74,10 +74,13 @@ constexpr real_t TAU_SHEAR = static_cast<real_t>(0.5) + static_cast<real_t>(3.0)
 constexpr real_t OMEGA_SHEAR = static_cast<real_t>(static_cast<double>(1) / static_cast<double>(TAU_SHEAR));
 constexpr real_t T_OMEGA_SHEAR = static_cast<real_t>(1.0) - OMEGA_SHEAR;
 constexpr real_t OMEGA_D2_SHEAR = static_cast<real_t>(0.5) * OMEGA_SHEAR;
+constexpr real_t TT_OMEGA_SHEAR = static_cast<real_t>(1.0) - OMEGA_D2_SHEAR;
 
 constexpr real_t TAU_BULK = static_cast<real_t>(0.5) + BULK_RELAXATION_FACTOR * (TAU_SHEAR - static_cast<real_t>(0.5));
 constexpr real_t OMEGA_BULK = static_cast<real_t>(static_cast<double>(1) / static_cast<double>(TAU_BULK));
 constexpr real_t T_OMEGA_BULK = static_cast<real_t>(1.0) - OMEGA_BULK;
+constexpr real_t OMEGA_D2_BULK = static_cast<real_t>(0.5) * OMEGA_BULK;
+constexpr real_t TT_OMEGA_BULK = static_cast<real_t>(1.0) - OMEGA_D2_BULK;
 
 // =================================================================================================== //
 

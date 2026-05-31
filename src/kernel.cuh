@@ -3,129 +3,14 @@
 #include "D3Q7.cuh"
 #include "deviceFunctions.cuh"
 #include "boundary/deviceRuntime.cuh"
+#include "boundary/thermal.cuh"
 
 // =================================================================================================== //
-// Thermal helpers
-
-__device__ [[nodiscard]] static __forceinline__ bool isThermalHotLid(
-    const natural_t z) noexcept
-{
-    return z == NZ - 1;
-}
-
-__device__ [[nodiscard]] static __forceinline__ bool isThermalColdWall(
-    const natural_t z) noexcept
-{
-    return z == 0;
-}
-
-__device__ [[nodiscard]] static __forceinline__ bool isThermalBoundary(
-    const natural_t x,
-    const natural_t y,
-    const natural_t z) noexcept
-{
-    return x == 0 || x == NX - 1 ||
-           y == 0 || y == NY - 1 ||
-           z == 0 || z == NZ - 1;
-}
-
-__device__ [[nodiscard]] static __forceinline__ bool isThermalDirichletWall(
-    const natural_t z) noexcept
-{
-    return isThermalHotLid(z) || isThermalColdWall(z);
-}
-
-__device__ [[nodiscard]] static __forceinline__ real_t thermalBoundaryTemperature(
-    const natural_t z) noexcept
-{
-    return isThermalHotLid(z) ? T_HOT : T_COLD;
-}
-
-__device__ static __forceinline__ void thermalWallVelocity(
-    const natural_t z,
-    real_t &ux,
-    real_t &uy,
-    real_t &uz) noexcept
-{
-    if (isThermalHotLid(z))
-    {
-        ux = U_CHAR;
-        uy = static_cast<real_t>(0);
-        uz = static_cast<real_t>(0);
-    }
-    else
-    {
-        ux = static_cast<real_t>(0);
-        uy = static_cast<real_t>(0);
-        uz = static_cast<real_t>(0);
-    }
-}
-
-__device__ static __forceinline__ void nearestThermalInteriorNode(
-    const natural_t x,
-    const natural_t y,
-    const natural_t z,
-    natural_t &xi,
-    natural_t &yi,
-    natural_t &zi) noexcept
-{
-    xi = x;
-    yi = y;
-    zi = z;
-
-    if constexpr (NX > 1)
-    {
-        if (x == 0)
-        {
-            xi = 1;
-        }
-        else if (x == NX - 1)
-        {
-            xi = NX - 2;
-        }
-    }
-
-    if constexpr (NY > 1)
-    {
-        if (y == 0)
-        {
-            yi = 1;
-        }
-        else if (y == NY - 1)
-        {
-            yi = NY - 2;
-        }
-    }
-
-    if constexpr (NZ > 1)
-    {
-        if (z == 0)
-        {
-            zi = 1;
-        }
-        else if (z == NZ - 1)
-        {
-            zi = NZ - 2;
-        }
-    }
-}
-
-__device__ static __forceinline__ void setThermalEquilibriumMoments(
-    real_t *__restrict__ moments,
-    const natural_t idx,
-    const real_t temperature,
-    const real_t ux,
-    const real_t uy,
-    const real_t uz) noexcept
-{
-    const real_t invCs2 = ThermalVelocitySet::as2();
-
-    moments[midx(idx, TEMP)] = temperature;
-    moments[midx(idx, TFX)] = temperature * ux * invCs2;
-    moments[midx(idx, TFY)] = temperature * uy * invCs2;
-    moments[midx(idx, TFZ)] = temperature * uz * invCs2;
-}
-
+// Thermal source hook
+//
+// Future extension point:
+// compression work, viscous heating, force-temperature coupling,
+// and source-velocity coupling.
 __device__ [[nodiscard]] static __forceinline__ real_t thermalSource(
     const natural_t,
     const natural_t,
@@ -135,17 +20,7 @@ __device__ [[nodiscard]] static __forceinline__ real_t thermalSource(
     const real_t,
     const real_t) noexcept
 {
-    if constexpr (THERMAL_SOURCE_ENABLED)
-    {
-        // Future extension point:
-        // compression work, viscous heating, force-temperature coupling,
-        // and source-velocity coupling.
-        return THERMAL_SOURCE_VALUE;
-    }
-    else
-    {
-        return static_cast<real_t>(0);
-    }
+    return THERMAL_SOURCE_VALUE;
 }
 
 __device__ [[nodiscard]] static __forceinline__ natural_t pullNeighborIndex(
@@ -343,36 +218,6 @@ __device__ static __forceinline__ void accumulateBulkDirection(
 }
 
 // =================================================================================================== //
-// Thermal initialization
-
-__global__ void thermalCavityInit(
-    real_t *__restrict__ moments,
-    real_t *__restrict__ dbuffer)
-{
-    const natural_t x = blockIdx.x * BLOCK_NX + threadIdx.x;
-    const natural_t y = blockIdx.y * BLOCK_NY + threadIdx.y;
-    const natural_t z = blockIdx.z * BLOCK_NZ + threadIdx.z;
-
-    if (x >= NX || y >= NY || z >= NZ)
-    {
-        return;
-    }
-
-    const natural_t idx = global3(x, y, z);
-
-    const real_t temperature = isThermalHotLid(z) ? T_HOT : T_COLD;
-
-    real_t uxWall;
-    real_t uyWall;
-    real_t uzWall;
-
-    thermalWallVelocity(z, uxWall, uyWall, uzWall);
-
-    setThermalEquilibriumMoments(moments, idx, temperature, uxWall, uyWall, uzWall);
-    setThermalEquilibriumMoments(dbuffer, idx, temperature, uxWall, uyWall, uzWall);
-}
-
-// =================================================================================================== //
 // Stream kernel
 //
 // This kernel reconstructs incoming hydro f_i and thermal g_i.
@@ -485,59 +330,31 @@ __global__ void stream(
     dbuffer[midx(idx, MXZ)] = mxz;
     dbuffer[midx(idx, MYZ)] = myz;
 
-    if constexpr (ENABLE_THERMAL)
+    if (!applyThermalBoundary(moments, dbuffer, x, y, z, idx))
     {
-        if (isThermalBoundary(x, y, z))
-        {
-            real_t temperature;
-            real_t uxWall;
-            real_t uyWall;
-            real_t uzWall;
+        real_t temperature = static_cast<real_t>(0);
+        real_t jx = static_cast<real_t>(0);
+        real_t jy = static_cast<real_t>(0);
+        real_t jz = static_cast<real_t>(0);
 
-            if (isThermalDirichletWall(z))
+        constexpr_for<0, ThermalVelocitySet::Q()>(
+            [&](const auto Q) noexcept
             {
-                temperature = thermalBoundaryTemperature(z);
-            }
-            else
-            {
-                natural_t xi;
-                natural_t yi;
-                natural_t zi;
+                accumulateThermalDirection<Q>(
+                    moments,
+                    x,
+                    y,
+                    z,
+                    temperature,
+                    jx,
+                    jy,
+                    jz);
+            });
 
-                nearestThermalInteriorNode(x, y, z, xi, yi, zi);
-
-                temperature = loadMoment(moments, global3(xi, yi, zi), TEMP);
-            }
-
-            thermalWallVelocity(z, uxWall, uyWall, uzWall);
-            setThermalEquilibriumMoments(dbuffer, idx, temperature, uxWall, uyWall, uzWall);
-        }
-        else
-        {
-            real_t temperature = static_cast<real_t>(0);
-            real_t jx = static_cast<real_t>(0);
-            real_t jy = static_cast<real_t>(0);
-            real_t jz = static_cast<real_t>(0);
-
-            constexpr_for<0, ThermalVelocitySet::Q()>(
-                [&](const auto Q) noexcept
-                {
-                    accumulateThermalDirection<Q>(
-                        moments,
-                        x,
-                        y,
-                        z,
-                        temperature,
-                        jx,
-                        jy,
-                        jz);
-                });
-
-            dbuffer[midx(idx, TEMP)] = temperature;
-            dbuffer[midx(idx, TFX)] = jx;
-            dbuffer[midx(idx, TFY)] = jy;
-            dbuffer[midx(idx, TFZ)] = jz;
-        }
+        dbuffer[midx(idx, TEMP)] = temperature;
+        dbuffer[midx(idx, TFX)] = jx;
+        dbuffer[midx(idx, TFY)] = jy;
+        dbuffer[midx(idx, TFZ)] = jz;
     }
 }
 
@@ -584,13 +401,10 @@ __global__ void collide(
     real_t jy = static_cast<real_t>(0);
     real_t jz = static_cast<real_t>(0);
 
-    if constexpr (ENABLE_THERMAL)
-    {
-        temperature = dbuffer[midx(idx, TEMP)];
-        jx = dbuffer[midx(idx, TFX)];
-        jy = dbuffer[midx(idx, TFY)];
-        jz = dbuffer[midx(idx, TFZ)];
-    }
+    temperature = dbuffer[midx(idx, TEMP)];
+    jx = dbuffer[midx(idx, TFX)];
+    jy = dbuffer[midx(idx, TFY)];
+    jz = dbuffer[midx(idx, TFZ)];
 
     const real_t invRho = static_cast<real_t>(1) / rho;
 
@@ -598,17 +412,14 @@ __global__ void collide(
     real_t forceY = static_cast<real_t>(0);
     real_t forceZ = static_cast<real_t>(0);
 
-    if constexpr (ENABLE_THERMAL && THERMAL_FORCING_ENABLED)
+    if (nodeType == BULK)
     {
-        if (nodeType == BULK)
-        {
-            const real_t buoyancy =
-                THERMAL_RHO0 * BETA_THERMAL * (temperature - T_REF);
+        const real_t buoyancy =
+            THERMAL_RHO0 * BETA_THERMAL * THERMAL_FORCE_SCALE * (temperature - T_REF);
 
-            forceX += buoyancy * THERMAL_GRAVITY_X;
-            forceY += buoyancy * THERMAL_GRAVITY_Y;
-            forceZ += buoyancy * THERMAL_GRAVITY_Z;
-        }
+        forceX += buoyancy * THERMAL_GRAVITY_X;
+        forceY += buoyancy * THERMAL_GRAVITY_Y;
+        forceZ += buoyancy * THERMAL_GRAVITY_Z;
     }
 
     const real_t scaleI = VelocitySet::scaleI();
@@ -679,32 +490,29 @@ __global__ void collide(
     real_t mxzPost = tOmega * mxz + omega * eqXZ;
     real_t myzPost = tOmega * myz + omega * eqYZ;
 
-    if constexpr (ENABLE_THERMAL && THERMAL_FORCING_ENABLED)
-    {
-        const real_t sxx = scaleI * invRho * forceX * uxEq;
-        const real_t syy = scaleI * invRho * forceY * uyEq;
-        const real_t szz = scaleI * invRho * forceZ * uzEq;
+    const real_t sxx = scaleI * invRho * forceX * uxEq;
+    const real_t syy = scaleI * invRho * forceY * uyEq;
+    const real_t szz = scaleI * invRho * forceZ * uzEq;
 
-        const real_t sxy = scaleI * invRho * (forceX * uyEq + forceY * uxEq);
-        const real_t sxz = scaleI * invRho * (forceX * uzEq + forceZ * uxEq);
-        const real_t syz = scaleI * invRho * (forceY * uzEq + forceZ * uyEq);
+    const real_t sxy = scaleI * invRho * (forceX * uyEq + forceY * uxEq);
+    const real_t sxz = scaleI * invRho * (forceX * uzEq + forceZ * uxEq);
+    const real_t syz = scaleI * invRho * (forceY * uzEq + forceZ * uyEq);
 
-        const real_t sourceTrace = sxx + syy + szz;
-        const real_t sourceTraceThird = oneThird * sourceTrace;
+    const real_t sourceTrace = sxx + syy + szz;
+    const real_t sourceTraceThird = oneThird * sourceTrace;
 
-        mxxPost += ttOmega * (sxx - sourceTraceThird) +
-                   ttOmegaBulk * sourceTraceThird;
+    mxxPost += ttOmega * (sxx - sourceTraceThird) +
+               ttOmegaBulk * sourceTraceThird;
 
-        myyPost += ttOmega * (syy - sourceTraceThird) +
-                   ttOmegaBulk * sourceTraceThird;
+    myyPost += ttOmega * (syy - sourceTraceThird) +
+               ttOmegaBulk * sourceTraceThird;
 
-        mzzPost += ttOmega * (szz - sourceTraceThird) +
-                   ttOmegaBulk * sourceTraceThird;
+    mzzPost += ttOmega * (szz - sourceTraceThird) +
+               ttOmegaBulk * sourceTraceThird;
 
-        mxyPost += ttOmega * sxy;
-        mxzPost += ttOmega * sxz;
-        myzPost += ttOmega * syz;
-    }
+    mxyPost += ttOmega * sxy;
+    mxzPost += ttOmega * sxz;
+    myzPost += ttOmega * syz;
 
     moments[midx(idx, RHO)] = rho;
     moments[midx(idx, UX)] = uxStore;
@@ -717,7 +525,6 @@ __global__ void collide(
     moments[midx(idx, MXZ)] = mxzPost;
     moments[midx(idx, MYZ)] = myzPost;
 
-    if constexpr (ENABLE_THERMAL)
     {
         if (isThermalBoundary(x, y, z))
         {

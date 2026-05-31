@@ -34,11 +34,25 @@ using real_t = float;
 // --------------------------------------------------------------------------------------------------- //
 // Hydro/reference scales
 
+#ifndef L_CHAR_VALUE
 #define L_CHAR_VALUE 256
+#endif
+
+#ifndef U_CHAR_VALUE
 #define U_CHAR_VALUE 0.05
+#endif
+
+#ifndef REYNOLDS_VALUE
 #define REYNOLDS_VALUE 10000
+#endif
+
+#ifndef NSTEPS_VALUE
 #define NSTEPS_VALUE 500000
+#endif
+
+#ifndef STAMP_VALUE
 #define STAMP_VALUE 10000
+#endif
 
 // --------------------------------------------------------------------------------------------------- //
 // Hydrodynamic two-relaxation-time split
@@ -47,56 +61,73 @@ using real_t = float;
 // BULK_RELAXATION_FACTOR_VALUE > 1.0 relaxes the bulk/trace mode more slowly.
 // BULK_RELAXATION_FACTOR_VALUE < 1.0 relaxes the bulk/trace mode faster, but must keep tau_bulk > 0.5.
 
+#ifndef BULK_RELAXATION_FACTOR_VALUE
 #define BULK_RELAXATION_FACTOR_VALUE 1.0
-
-// --------------------------------------------------------------------------------------------------- //
-// Thermal model switches
-//
-// ENABLE_THERMAL_VALUE:
-//   0 = hydro only
-//   1 = hydro + D3Q7 thermal MR extension
-//
-// THERMAL_FORCING_ENABLED_VALUE:
-//   0 = passive temperature field, no thermal feedback on hydro
-//   1 = enable Boussinesq force
-//
-// THERMAL_SOURCE_ENABLED_VALUE:
-//   0 = no volumetric thermal source
-//   1 = enable uniform source THERMAL_SOURCE_VALUE_PARAM
-
-#define ENABLE_THERMAL_VALUE 0
-#define THERMAL_FORCING_ENABLED_VALUE 0
-#define THERMAL_SOURCE_ENABLED_VALUE 0
+#endif
 
 // --------------------------------------------------------------------------------------------------- //
 // Thermal physical/numerical parameters
 
+#ifndef PRANDTL_VALUE
 #define PRANDTL_VALUE 0.71
+#endif
 
+#ifndef T_COLD_VALUE
 #define T_COLD_VALUE 0.0
+#endif
+
+#ifndef T_HOT_VALUE
 #define T_HOT_VALUE 1.0
+#endif
+
+#ifndef T_REF_VALUE
 #define T_REF_VALUE 0.5
+#endif
 
-#define BETA_THERMAL_VALUE 0.0
+#ifndef BETA_THERMAL_VALUE
+#define BETA_THERMAL_VALUE 1.0
+#endif
 
+#ifndef THERMAL_SOURCE_VALUE_PARAM
 #define THERMAL_SOURCE_VALUE_PARAM 0.0
+#endif
 
+#ifndef THERMAL_GRAVITY_X_VALUE
 #define THERMAL_GRAVITY_X_VALUE 0.0
-#define THERMAL_GRAVITY_Y_VALUE 0.0
-#define THERMAL_GRAVITY_Z_VALUE 0.0
+#endif
 
+#ifndef THERMAL_GRAVITY_Y_VALUE
+#define THERMAL_GRAVITY_Y_VALUE 0.0
+#endif
+
+#ifndef THERMAL_GRAVITY_Z_VALUE
+#define THERMAL_GRAVITY_Z_VALUE -1.0
+#endif
+
+#ifndef THERMAL_RHO0_VALUE
 #define THERMAL_RHO0_VALUE 1.0
+#endif
 
 // D3Q7 thermal lattice convention:
 // w0 = 1/4, waxis = 1/8, therefore c_sT^2 = 1/4.
+#ifndef THERMAL_CS2_VALUE
 #define THERMAL_CS2_VALUE 0.25
+#endif
 
 // --------------------------------------------------------------------------------------------------- //
 // CUDA launch geometry
 
+#ifndef BLOCK_NX_VALUE
 #define BLOCK_NX_VALUE 32
+#endif
+
+#ifndef BLOCK_NY_VALUE
 #define BLOCK_NY_VALUE 4
+#endif
+
+#ifndef BLOCK_NZ_VALUE
 #define BLOCK_NZ_VALUE 4
+#endif
 
 // =================================================================================================== //
 // Typed constants
@@ -125,9 +156,6 @@ constexpr real_t T_OMEGA_BULK = static_cast<real_t>(1.0) - OMEGA_BULK;
 // =================================================================================================== //
 // Thermal parameters
 
-constexpr bool ENABLE_THERMAL = static_cast<bool>(ENABLE_THERMAL_VALUE);
-constexpr bool THERMAL_FORCING_ENABLED = static_cast<bool>(THERMAL_FORCING_ENABLED_VALUE);
-constexpr bool THERMAL_SOURCE_ENABLED = static_cast<bool>(THERMAL_SOURCE_ENABLED_VALUE);
 constexpr real_t PRANDTL = static_cast<real_t>(PRANDTL_VALUE);
 constexpr real_t T_COLD = static_cast<real_t>(T_COLD_VALUE);
 constexpr real_t T_HOT = static_cast<real_t>(T_HOT_VALUE);
@@ -139,6 +167,10 @@ constexpr real_t THERMAL_GRAVITY_Y = static_cast<real_t>(THERMAL_GRAVITY_Y_VALUE
 constexpr real_t THERMAL_GRAVITY_Z = static_cast<real_t>(THERMAL_GRAVITY_Z_VALUE);
 constexpr real_t THERMAL_RHO0 = static_cast<real_t>(THERMAL_RHO0_VALUE);
 constexpr real_t THERMAL_CS2 = static_cast<real_t>(THERMAL_CS2_VALUE);
+
+constexpr real_t THERMAL_FORCE_SCALE =
+    static_cast<real_t>((static_cast<double>(U_CHAR) * static_cast<double>(U_CHAR)) /
+                        static_cast<double>(L_CHAR));
 
 constexpr real_t THERMAL_DIFFUSIVITY = VISCOSITY / PRANDTL;
 constexpr real_t TAU_T = static_cast<real_t>(0.5) + THERMAL_DIFFUSIVITY / THERMAL_CS2;
@@ -174,7 +206,7 @@ constexpr natural_t HYDRO_MOMENTS = 10;
 // Thermal MR storage:
 // TEMP, TFX, TFY, TFZ.
 // D3Q7 populations are reconstructed locally, not stored.
-constexpr natural_t THERMAL_MOMENTS = ENABLE_THERMAL ? 4 : 0;
+constexpr natural_t THERMAL_MOMENTS = 4;
 
 constexpr natural_t NUM_MOMENTS = HYDRO_MOMENTS + THERMAL_MOMENTS;
 
@@ -214,12 +246,7 @@ static_assert(BLOCK_NX > 0, "BLOCK_NX must be positive.");
 static_assert(BLOCK_NY > 0, "BLOCK_NY must be positive.");
 static_assert(BLOCK_NZ > 0, "BLOCK_NZ must be positive.");
 
-static_assert(ENABLE_THERMAL_VALUE == 0 || ENABLE_THERMAL_VALUE == 1, "ENABLE_THERMAL_VALUE must be 0 or 1.");
-static_assert(THERMAL_FORCING_ENABLED_VALUE == 0 || THERMAL_FORCING_ENABLED_VALUE == 1, "THERMAL_FORCING_ENABLED_VALUE must be 0 or 1.");
-static_assert(THERMAL_SOURCE_ENABLED_VALUE == 0 || THERMAL_SOURCE_ENABLED_VALUE == 1, "THERMAL_SOURCE_ENABLED_VALUE must be 0 or 1.");
-
 static_assert(HYDRO_MOMENTS == 10, "Hydro MR layout expects 10 moments.");
-static_assert(!ENABLE_THERMAL || NUM_MOMENTS == 14, "Thermal-enabled layout expects 14 moments.");
-static_assert(ENABLE_THERMAL || NUM_MOMENTS == 10, "Thermal-disabled layout expects 10 moments.");
+static_assert(NUM_MOMENTS == 14, "Thermal MR layout expects 14 moments.");
 
 // =================================================================================================== //

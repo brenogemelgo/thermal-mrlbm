@@ -93,7 +93,8 @@ int main(int argc, char **argv)
     constexpr dim3 block(BLOCK_NX, BLOCK_NY, BLOCK_NZ);
     constexpr dim3 grid(GRID_X, GRID_Y, GRID_Z);
 
-    CUDA_CHECK(cudaFuncSetCacheConfig(streamCollide, cudaFuncCachePreferL1));
+    CUDA_CHECK(cudaFuncSetCacheConfig(stream, cudaFuncCachePreferL1));
+    CUDA_CHECK(cudaFuncSetCacheConfig(collide, cudaFuncCachePreferL1));
     CUDA_CHECK(initIRBCBoundaryTables());
 
 #ifndef BENCHMARK
@@ -109,11 +110,8 @@ int main(int argc, char **argv)
     {
         cavityInit<<<grid, block>>>(moments, dbuffer);
         CUDA_CHECK(cudaGetLastError());
-        if constexpr (ENABLE_THERMAL)
-        {
-            thermalCavityInit<<<grid, block>>>(moments, dbuffer);
-            CUDA_CHECK(cudaGetLastError());
-        }
+        thermalCavityInit<<<grid, block>>>(moments, dbuffer);
+        CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
     }
 
@@ -132,22 +130,23 @@ int main(int argc, char **argv)
     }
     std::cout << "case id: " << caseId << std::endl;
     std::cout << "output: " << getSimulationOutputDirectory() << std::endl;
-    if constexpr (ENABLE_THERMAL)
+    if (!validateThermalVelocitySetMoments())
     {
-        if (!validateThermalVelocitySetMoments())
-        {
-            std::cerr << "D3Q7 thermal velocity-set moment test failed" << std::endl;
-            return EXIT_FAILURE;
-        }
-
-        std::cout << "thermal enabled: Pr=" << static_cast<double>(PRANDTL)
-                  << ", chi=" << static_cast<double>(THERMAL_DIFFUSIVITY)
-                  << ", tauT=" << static_cast<double>(TAU_T)
-                  << ", thermal forcing=" << (THERMAL_FORCING_ENABLED ? "on" : "off")
-                  << ", thermal source=" << (THERMAL_SOURCE_ENABLED ? "on" : "off")
-                  << std::endl;
-        printThermalDiagnosticsHeader();
+        std::cerr << "D3Q7 thermal velocity-set moment test failed" << std::endl;
+        return EXIT_FAILURE;
     }
+
+    std::cout << "thermal: Pr=" << static_cast<double>(PRANDTL)
+              << ", chi=" << static_cast<double>(THERMAL_DIFFUSIVITY)
+              << ", tauT=" << static_cast<double>(TAU_T)
+              << ", beta=" << static_cast<double>(BETA_THERMAL)
+              << ", gravity=(" << static_cast<double>(THERMAL_GRAVITY_X)
+              << ',' << static_cast<double>(THERMAL_GRAVITY_Y)
+              << ',' << static_cast<double>(THERMAL_GRAVITY_Z)
+              << "), forceScale=" << static_cast<double>(THERMAL_FORCE_SCALE)
+              << ", source=" << static_cast<double>(THERMAL_SOURCE_VALUE)
+              << std::endl;
+    printThermalDiagnosticsHeader();
 #ifndef BENCHMARK
     std::cout << "LDC profile samples: every timestep" << std::endl;
 #endif
@@ -159,12 +158,8 @@ int main(int argc, char **argv)
 
     for (natural_t t = startStep; t < NSTEPS; ++t)
     {
-        streamCollide<<<grid, block>>>(moments, dbuffer);
-        if constexpr (ENABLE_THERMAL)
-        {
-            thermalStreamCollide<<<grid, block>>>(moments, dbuffer);
-        }
-        std::swap(moments, dbuffer);
+        stream<<<grid, block>>>(moments, dbuffer);
+        collide<<<grid, block>>>(moments, dbuffer);
 
 #ifndef BENCHMARK
         CUDA_CHECK(writeLdcProfileSample(ldcProfiles, moments, t + 1));
@@ -184,11 +179,8 @@ int main(int argc, char **argv)
             std::cout << "MLUPS: " << stampMlups << std::endl;
 
             writeOutput(moments, t + 1);
-            if constexpr (ENABLE_THERMAL)
-            {
-                const ThermalDiagnostics diagnostics = computeThermalDiagnostics(moments);
-                printThermalDiagnosticsLine(t + 1, diagnostics);
-            }
+            const ThermalDiagnostics diagnostics = computeThermalDiagnostics(moments);
+            printThermalDiagnosticsLine(t + 1, diagnostics);
 
             lastStamp = std::chrono::high_resolution_clock::now();
             lastStampStep = t + 1;

@@ -325,6 +325,8 @@ struct ThermalDiagnostics
     double sumTemperature = 0.0;
     double maxVelocity = 0.0;
     double maxHydroForce = 0.0;
+    natural_t nonFiniteTemperatureCells = 0;
+    natural_t nonFiniteVelocityCells = 0;
 };
 
 static inline void copyTemperatureToHost(
@@ -335,29 +337,6 @@ static inline void copyTemperatureToHost(
     outputCheckCuda(
         cudaMemcpy(temperature.data(), deviceMoments + CELLS * TEMP, CELLS * sizeof(real_t), cudaMemcpyDeviceToHost),
         "cudaMemcpy temperature field");
-}
-
-static inline void writeTemperatureBinary(
-    const real_t *deviceMoments,
-    const std::filesystem::path &path)
-{
-    std::vector<real_t> temperature;
-    copyTemperatureToHost(deviceMoments, temperature);
-
-    std::ofstream out(path, std::ios::binary);
-    if (!out)
-    {
-        std::cerr << "Could not open temperature output: " << path << std::endl;
-        std::exit(EXIT_FAILURE);
-    }
-
-    out.write(reinterpret_cast<const char *>(temperature.data()),
-              static_cast<std::streamsize>(CELLS * sizeof(real_t)));
-    if (!out)
-    {
-        std::cerr << "Could not write temperature output: " << path << std::endl;
-        std::exit(EXIT_FAILURE);
-    }
 }
 
 static inline ThermalDiagnostics computeThermalDiagnostics(
@@ -373,27 +352,33 @@ static inline ThermalDiagnostics computeThermalDiagnostics(
     for (const real_t value : temperature)
     {
         const double t = static_cast<double>(value);
+        if (!std::isfinite(t))
+        {
+            ++diagnostics.nonFiniteTemperatureCells;
+            continue;
+        }
+
         diagnostics.minTemperature = std::min(diagnostics.minTemperature, t);
         diagnostics.maxTemperature = std::max(diagnostics.maxTemperature, t);
         diagnostics.sumTemperature += t;
 
-        if constexpr (THERMAL_FORCING_ENABLED)
-        {
-            const double forceX = static_cast<double>(THERMAL_RHO0) *
-                                  static_cast<double>(BETA_THERMAL) *
-                                  (t - static_cast<double>(T_REF)) *
-                                  static_cast<double>(THERMAL_GRAVITY_X);
-            const double forceY = static_cast<double>(THERMAL_RHO0) *
-                                  static_cast<double>(BETA_THERMAL) *
-                                  (t - static_cast<double>(T_REF)) *
-                                  static_cast<double>(THERMAL_GRAVITY_Y);
-            const double forceZ = static_cast<double>(THERMAL_RHO0) *
-                                  static_cast<double>(BETA_THERMAL) *
-                                  (t - static_cast<double>(T_REF)) *
-                                  static_cast<double>(THERMAL_GRAVITY_Z);
-            const double forceNorm = std::sqrt(forceX * forceX + forceY * forceY + forceZ * forceZ);
-            diagnostics.maxHydroForce = std::max(diagnostics.maxHydroForce, forceNorm);
-        }
+        const double forceX = static_cast<double>(THERMAL_RHO0) *
+                              static_cast<double>(BETA_THERMAL) *
+                              static_cast<double>(THERMAL_FORCE_SCALE) *
+                              (t - static_cast<double>(T_REF)) *
+                              static_cast<double>(THERMAL_GRAVITY_X);
+        const double forceY = static_cast<double>(THERMAL_RHO0) *
+                              static_cast<double>(BETA_THERMAL) *
+                              static_cast<double>(THERMAL_FORCE_SCALE) *
+                              (t - static_cast<double>(T_REF)) *
+                              static_cast<double>(THERMAL_GRAVITY_Y);
+        const double forceZ = static_cast<double>(THERMAL_RHO0) *
+                              static_cast<double>(BETA_THERMAL) *
+                              static_cast<double>(THERMAL_FORCE_SCALE) *
+                              (t - static_cast<double>(T_REF)) *
+                              static_cast<double>(THERMAL_GRAVITY_Z);
+        const double forceNorm = std::sqrt(forceX * forceX + forceY * forceY + forceZ * forceZ);
+        diagnostics.maxHydroForce = std::max(diagnostics.maxHydroForce, forceNorm);
     }
 
     std::vector<real_t> ux(CELLS);
@@ -416,7 +401,21 @@ static inline ThermalDiagnostics computeThermalDiagnostics(
         const double vx = static_cast<double>(ux[idx]) * invScaleI;
         const double vy = static_cast<double>(uy[idx]) * invScaleI;
         const double vz = static_cast<double>(uz[idx]) * invScaleI;
+        if (!std::isfinite(vx) || !std::isfinite(vy) || !std::isfinite(vz))
+        {
+            ++diagnostics.nonFiniteVelocityCells;
+            continue;
+        }
+
         diagnostics.maxVelocity = std::max(diagnostics.maxVelocity, std::sqrt(vx * vx + vy * vy + vz * vz));
+    }
+
+    if (diagnostics.nonFiniteTemperatureCells == CELLS)
+    {
+        diagnostics.minTemperature = std::numeric_limits<double>::quiet_NaN();
+        diagnostics.maxTemperature = std::numeric_limits<double>::quiet_NaN();
+        diagnostics.sumTemperature = std::numeric_limits<double>::quiet_NaN();
+        diagnostics.maxHydroForce = std::numeric_limits<double>::quiet_NaN();
     }
 
     return diagnostics;
@@ -465,7 +464,7 @@ static inline bool validateThermalVelocitySetMoments()
 static inline void printThermalDiagnosticsHeader()
 {
     std::cout << "thermal diagnostics:" << std::endl;
-    std::cout << "step,minT,maxT,sumT,maxU,tauNu,tauBulk,tauT,chi,Pr,hydroForceMax" << std::endl;
+    std::cout << "step,minT,maxT,sumT,maxU,tauNu,tauBulk,tauT,chi,Pr,hydroForceMax,badT,badU" << std::endl;
 }
 
 static inline void printThermalDiagnosticsLine(
@@ -483,7 +482,9 @@ static inline void printThermalDiagnosticsLine(
               << static_cast<double>(TAU_T) << ','
               << static_cast<double>(THERMAL_DIFFUSIVITY) << ','
               << static_cast<double>(PRANDTL) << ','
-              << diagnostics.maxHydroForce << std::endl;
+              << diagnostics.maxHydroForce << ','
+              << diagnostics.nonFiniteTemperatureCells << ','
+              << diagnostics.nonFiniteVelocityCells << std::endl;
 }
 
 static inline void writeOutput(
@@ -495,12 +496,8 @@ static inline void writeOutput(
 
     const std::string base = outputStepName(step);
     const std::filesystem::path binaryPath = dir / (base + ".bin");
-    // const std::filesystem::path vtiPath = dir / (base + ".vti");
+    const std::filesystem::path vtiPath = dir / (base + ".vti");
 
     writeBinary(deviceMoments, binaryPath);
-    if constexpr (ENABLE_THERMAL)
-    {
-        writeTemperatureBinary(deviceMoments, dir / (base + "_temperature.bin"));
-    }
-    // writeVti(binaryPath, vtiPath);
+    writeVti(binaryPath, vtiPath);
 }

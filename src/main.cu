@@ -109,6 +109,11 @@ int main(int argc, char **argv)
     {
         cavityInit<<<grid, block>>>(moments, dbuffer);
         CUDA_CHECK(cudaGetLastError());
+        if constexpr (ENABLE_THERMAL)
+        {
+            thermalCavityInit<<<grid, block>>>(moments, dbuffer);
+            CUDA_CHECK(cudaGetLastError());
+        }
         CUDA_CHECK(cudaDeviceSynchronize());
     }
 
@@ -127,6 +132,22 @@ int main(int argc, char **argv)
     }
     std::cout << "case id: " << caseId << std::endl;
     std::cout << "output: " << getSimulationOutputDirectory() << std::endl;
+    if constexpr (ENABLE_THERMAL)
+    {
+        if (!validateThermalVelocitySetMoments())
+        {
+            std::cerr << "D3Q7 thermal velocity-set moment test failed" << std::endl;
+            return EXIT_FAILURE;
+        }
+
+        std::cout << "thermal enabled: Pr=" << static_cast<double>(PRANDTL)
+                  << ", chi=" << static_cast<double>(THERMAL_DIFFUSIVITY)
+                  << ", tauT=" << static_cast<double>(TAU_T)
+                  << ", thermal forcing=" << (THERMAL_FORCING_ENABLED ? "on" : "off")
+                  << ", thermal source=" << (THERMAL_SOURCE_ENABLED ? "on" : "off")
+                  << std::endl;
+        printThermalDiagnosticsHeader();
+    }
 #ifndef BENCHMARK
     std::cout << "LDC profile samples: every timestep" << std::endl;
 #endif
@@ -139,6 +160,10 @@ int main(int argc, char **argv)
     for (natural_t t = startStep; t < NSTEPS; ++t)
     {
         streamCollide<<<grid, block>>>(moments, dbuffer);
+        if constexpr (ENABLE_THERMAL)
+        {
+            thermalStreamCollide<<<grid, block>>>(moments, dbuffer);
+        }
         std::swap(moments, dbuffer);
 
 #ifndef BENCHMARK
@@ -159,6 +184,11 @@ int main(int argc, char **argv)
             std::cout << "MLUPS: " << stampMlups << std::endl;
 
             writeOutput(moments, t + 1);
+            if constexpr (ENABLE_THERMAL)
+            {
+                const ThermalDiagnostics diagnostics = computeThermalDiagnostics(moments);
+                printThermalDiagnosticsLine(t + 1, diagnostics);
+            }
 
             lastStamp = std::chrono::high_resolution_clock::now();
             lastStampStep = t + 1;

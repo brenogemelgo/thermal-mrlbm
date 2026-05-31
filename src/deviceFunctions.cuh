@@ -25,7 +25,7 @@ __device__ static __forceinline__ real_t fma_rn(real_t a, real_t b, real_t c)
 {
     if constexpr (std::is_same_v<real_t, float>)
     {
-        return fma_rn(a, b, c);
+        return __fmaf_rn(a, b, c);
     }
     else
     {

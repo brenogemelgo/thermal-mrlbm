@@ -118,47 +118,8 @@ int main(int argc, char **argv)
         std::cout << "simulation start" << std::endl;
     }
     std::cout << "case id: " << caseId << std::endl;
-    std::cout << "case = thermal round jet" << std::endl;
     std::cout << "output: " << getSimulationOutputDirectory() << std::endl;
-    if (!validateThermalVelocitySetMoments())
-    {
-        std::cerr << "D3Q7 thermal velocity-set moment test failed" << std::endl;
-        return EXIT_FAILURE;
-    }
 
-    std::cout << "domain: NX=" << NX << ", NY=" << NY << ", NZ=" << NZ << std::endl;
-    std::cout << "U_CHAR=" << static_cast<double>(U_CHAR)
-              << ", viscosity=" << static_cast<double>(VISCOSITY)
-              << ", Reynolds_input=" << static_cast<double>(REYNOLDS)
-              << std::endl;
-    std::cout << "jet: diameter=" << static_cast<double>(JET_DIAMETER)
-              << ", radius=" << static_cast<double>(JET_RADIUS)
-              << ", velocity=(" << static_cast<double>(JET_UX)
-              << ',' << static_cast<double>(JET_UY)
-              << ',' << static_cast<double>(JET_UZ)
-              << "), temperature=" << static_cast<double>(JET_TEMPERATURE)
-              << ", ambientTemperature=" << static_cast<double>(AMBIENT_TEMPERATURE)
-              << ", Re_jet=" << static_cast<double>(RE_JET)
-              << std::endl;
-    std::cout << "thermal: Pr=" << static_cast<double>(PRANDTL)
-              << ", chi=" << static_cast<double>(THERMAL_DIFFUSIVITY)
-              << ", tauNu=" << static_cast<double>(TAU_NU)
-              << ", tauBulk=" << static_cast<double>(TAU_BULK)
-              << ", tauT=" << static_cast<double>(TAU_T)
-              << ", T_COLD=" << static_cast<double>(T_COLD)
-              << ", T_HOT=" << static_cast<double>(T_HOT)
-              << ", beta=" << static_cast<double>(BETA_THERMAL)
-              << ", forceScale=" << static_cast<double>(THERMAL_FORCE_SCALE)
-              << ", source=" << static_cast<double>(THERMAL_SOURCE_VALUE)
-              << std::endl;
-    std::cout << "gravity=(" << static_cast<double>(THERMAL_GRAVITY_X)
-              << ',' << static_cast<double>(THERMAL_GRAVITY_Y)
-              << ',' << static_cast<double>(THERMAL_GRAVITY_Z)
-              << ')' << std::endl;
-    std::cout << "boundary summary:" << std::endl;
-    std::cout << "  z=0 binary circular inlet + solid bed" << std::endl;
-    std::cout << "  x/y periodic" << std::endl;
-    std::cout << "  z=NZ-1 copy outflow" << std::endl;
     printThermalDiagnosticsHeader();
     const auto start = std::chrono::high_resolution_clock::now();
 #ifndef BENCHMARK

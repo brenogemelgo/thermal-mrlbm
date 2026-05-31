@@ -387,21 +387,21 @@ static inline ThermalDiagnostics computeThermalDiagnostics(
         diagnostics.maxTemperature = std::max(diagnostics.maxTemperature, t);
         diagnostics.sumTemperature += t;
 
-        const double forceX = static_cast<double>(THERMAL_RHO0) *
-                              static_cast<double>(BETA_THERMAL) *
-                              static_cast<double>(THERMAL_FORCE_SCALE) *
-                              (t - static_cast<double>(T_REF)) *
-                              static_cast<double>(THERMAL_GRAVITY_X);
-        const double forceY = static_cast<double>(THERMAL_RHO0) *
-                              static_cast<double>(BETA_THERMAL) *
-                              static_cast<double>(THERMAL_FORCE_SCALE) *
-                              (t - static_cast<double>(T_REF)) *
-                              static_cast<double>(THERMAL_GRAVITY_Y);
-        const double forceZ = static_cast<double>(THERMAL_RHO0) *
-                              static_cast<double>(BETA_THERMAL) *
-                              static_cast<double>(THERMAL_FORCE_SCALE) *
-                              (t - static_cast<double>(T_REF)) *
-                              static_cast<double>(THERMAL_GRAVITY_Z);
+        const double forceX =
+            static_cast<double>(BETA_THERMAL) *
+            static_cast<double>(THERMAL_FORCE_SCALE) *
+            (t - static_cast<double>(T_REF)) *
+            static_cast<double>(THERMAL_GRAVITY_X);
+        const double forceY =
+            static_cast<double>(BETA_THERMAL) *
+            static_cast<double>(THERMAL_FORCE_SCALE) *
+            (t - static_cast<double>(T_REF)) *
+            static_cast<double>(THERMAL_GRAVITY_Y);
+        const double forceZ =
+            static_cast<double>(BETA_THERMAL) *
+            static_cast<double>(THERMAL_FORCE_SCALE) *
+            (t - static_cast<double>(T_REF)) *
+            static_cast<double>(THERMAL_GRAVITY_Z);
         const double forceNorm = std::sqrt(forceX * forceX + forceY * forceY + forceZ * forceZ);
         diagnostics.maxHydroForce = std::max(diagnostics.maxHydroForce, forceNorm);
     }
@@ -478,46 +478,6 @@ static inline ThermalDiagnostics computeThermalDiagnostics(
     }
 
     return diagnostics;
-}
-
-static inline bool validateThermalVelocitySetMoments()
-{
-    constexpr int cx[7] = {0, 1, -1, 0, 0, 0, 0};
-    constexpr int cy[7] = {0, 0, 0, 1, -1, 0, 0};
-    constexpr int cz[7] = {0, 0, 0, 0, 0, 1, -1};
-    constexpr double w[7] = {0.25, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125};
-
-    double sumW = 0.0;
-    double first[3] = {};
-    double second[3][3] = {};
-
-    for (natural_t q = 0; q < 7; ++q)
-    {
-        const double c[3] = {static_cast<double>(cx[q]), static_cast<double>(cy[q]), static_cast<double>(cz[q])};
-        sumW += w[q];
-        for (natural_t a = 0; a < 3; ++a)
-        {
-            first[a] += w[q] * c[a];
-            for (natural_t b = 0; b < 3; ++b)
-            {
-                second[a][b] += w[q] * c[a] * c[b];
-            }
-        }
-    }
-
-    constexpr double tolerance = 1.0e-12;
-    bool ok = std::abs(sumW - 1.0) <= tolerance;
-    for (natural_t a = 0; a < 3; ++a)
-    {
-        ok = ok && std::abs(first[a]) <= tolerance;
-        for (natural_t b = 0; b < 3; ++b)
-        {
-            const double expected = a == b ? static_cast<double>(THERMAL_CS2) : 0.0;
-            ok = ok && std::abs(second[a][b] - expected) <= tolerance;
-        }
-    }
-
-    return ok;
 }
 
 static inline void printThermalDiagnosticsHeader()

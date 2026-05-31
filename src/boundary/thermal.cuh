@@ -61,12 +61,10 @@ __device__ static __forceinline__ void setThermalEquilibriumMoments(
     const real_t uy,
     const real_t uz) noexcept
 {
-    const real_t invCs2 = ThermalVelocitySet::as2();
-
     moments[midx(idx, TEMP)] = temperature;
-    moments[midx(idx, TFX)] = temperature * ux * invCs2;
-    moments[midx(idx, TFY)] = temperature * uy * invCs2;
-    moments[midx(idx, TFZ)] = temperature * uz * invCs2;
+    moments[midx(idx, TFX)] = temperature * ux * ThermalVelocitySet::as2();
+    moments[midx(idx, TFY)] = temperature * uy * ThermalVelocitySet::as2();
+    moments[midx(idx, TFZ)] = temperature * uz * ThermalVelocitySet::as2();
 }
 
 __device__ static __forceinline__ void setJetInletMoments(
@@ -77,16 +75,18 @@ __device__ static __forceinline__ void setJetInletMoments(
         moments,
         idx,
         static_cast<real_t>(1),
-        JET_UX,
-        JET_UY,
-        JET_UZ);
+        static_cast<real_t>(0),
+        static_cast<real_t>(0),
+        static_cast<real_t>(U_CHAR));
+
     setThermalEquilibriumMoments(
         moments,
         idx,
-        JET_TEMPERATURE,
-        JET_UX,
-        JET_UY,
-        JET_UZ);
+        T_HOT,
+        static_cast<real_t>(1),
+        static_cast<real_t>(0),
+        static_cast<real_t>(0),
+        static_cast<real_t>(U_CHAR));
 }
 
 __device__ static __forceinline__ void setJetAmbientMoments(
@@ -100,10 +100,11 @@ __device__ static __forceinline__ void setJetAmbientMoments(
         static_cast<real_t>(0),
         static_cast<real_t>(0),
         static_cast<real_t>(0));
+
     setThermalEquilibriumMoments(
         moments,
         idx,
-        AMBIENT_TEMPERATURE,
+        T_COLD,
         static_cast<real_t>(0),
         static_cast<real_t>(0),
         static_cast<real_t>(0));
@@ -116,10 +117,9 @@ __device__ static __forceinline__ void setJetBedThermalMoments(
     const natural_t y,
     const natural_t idx) noexcept
 {
-    // The subsea bed is a solid wall. Its scalar value uses a zero-normal-gradient
-    // copy from the adjacent fluid plane, with no wall advection.
     const natural_t src = global3(x, y, 1);
     const real_t temperature = loadMoment(sourceMoments, src, TEMP);
+
     setThermalEquilibriumMoments(
         targetMoments,
         idx,

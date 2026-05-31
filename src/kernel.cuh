@@ -140,7 +140,7 @@ __device__ static __forceinline__ void accumulateBulkDirection(
     }
 
     const real_t wrho = VelocitySet::w<Q>() * loadMoment(moments, src, RHO);
-    const real_t fi = __fmaf_rn(wrho, cu + mh, wrho);
+    const real_t fi = fma_rn(wrho, cu + mh, wrho);
 
     rho += fi;
 
@@ -283,9 +283,9 @@ __global__ void stream(
     uy *= invRho;
     uz *= invRho;
 
-    mxx = __fmaf_rn(mxx, invRho, -VelocitySet::cs2());
-    myy = __fmaf_rn(myy, invRho, -VelocitySet::cs2());
-    mzz = __fmaf_rn(mzz, invRho, -VelocitySet::cs2());
+    mxx = fma_rn(mxx, invRho, -VelocitySet::cs2());
+    myy = fma_rn(myy, invRho, -VelocitySet::cs2());
+    mzz = fma_rn(mzz, invRho, -VelocitySet::cs2());
     mxy *= invRho;
     mxz *= invRho;
     myz *= invRho;
@@ -347,15 +347,6 @@ __global__ void collide(
         return;
     }
 
-    constexpr real_t scaleI = VelocitySet::scaleI();
-    constexpr real_t scaleII = VelocitySet::scaleII();
-    constexpr real_t scaleIJ = VelocitySet::scaleIJ();
-    constexpr real_t invScaleI = static_cast<real_t>(1) / scaleI;
-    constexpr real_t halfScaleI = static_cast<real_t>(0.5) * scaleI;
-    constexpr real_t oneThird = static_cast<real_t>(1.0 / 3.0);
-    constexpr real_t fluxOmega = static_cast<real_t>(1) - OMEGA_T;
-    constexpr real_t invThermalCs2 = ThermalVelocitySet::as2();
-
     const real_t rho = dbuffer[midx(idx, RHO)];
     const real_t invRho = static_cast<real_t>(1) / rho;
 
@@ -383,35 +374,22 @@ __global__ void collide(
     real_t uyStore = uy;
     real_t uzStore = uz;
 
-    if constexpr (THERMAL_FORCE_ACTIVE)
-    {
-        const real_t buoyancy =
-            THERMAL_RHO0 *
-            BETA_THERMAL *
-            THERMAL_FORCE_SCALE *
-            (temperature - T_REF);
+    const real_t buoyancy =
+        BETA_THERMAL *
+        THERMAL_FORCE_SCALE *
+        (temperature - T_REF);
 
-        if constexpr (THERMAL_FORCE_X_ACTIVE)
-        {
-            const real_t forceX = buoyancy * THERMAL_GRAVITY_X;
-            uxEq = __fmaf_rn(halfScaleI * invRho, forceX, ux);
-            uxStore = __fmaf_rn(scaleI * invRho, forceX, ux);
-        }
+    const real_t forceX = buoyancy * THERMAL_GRAVITY_X;
+    uxEq = fma_rn(halfScaleI * invRho, forceX, ux);
+    uxStore = fma_rn(scaleI * invRho, forceX, ux);
 
-        if constexpr (THERMAL_FORCE_Y_ACTIVE)
-        {
-            const real_t forceY = buoyancy * THERMAL_GRAVITY_Y;
-            uyEq = __fmaf_rn(halfScaleI * invRho, forceY, uy);
-            uyStore = __fmaf_rn(scaleI * invRho, forceY, uy);
-        }
+    const real_t forceY = buoyancy * THERMAL_GRAVITY_Y;
+    uyEq = fma_rn(halfScaleI * invRho, forceY, uy);
+    uyStore = fma_rn(scaleI * invRho, forceY, uy);
 
-        if constexpr (THERMAL_FORCE_Z_ACTIVE)
-        {
-            const real_t forceZ = buoyancy * THERMAL_GRAVITY_Z;
-            uzEq = __fmaf_rn(halfScaleI * invRho, forceZ, uz);
-            uzStore = __fmaf_rn(scaleI * invRho, forceZ, uz);
-        }
-    }
+    const real_t forceZ = buoyancy * THERMAL_GRAVITY_Z;
+    uzEq = fma_rn(halfScaleI * invRho, forceZ, uz);
+    uzStore = fma_rn(scaleI * invRho, forceZ, uz);
 
     const real_t eqXX = static_cast<real_t>(0.5) * uxEq * uxEq;
     const real_t eqYY = static_cast<real_t>(0.5) * uyEq * uyEq;
@@ -440,9 +418,9 @@ __global__ void collide(
         OMEGA * (eqZZ - traceEqThird) +
         tracePostThird;
 
-    mxy = __fmaf_rn(OMEGA, uxEq * uyEq, T_OMEGA * mxy);
-    mxz = __fmaf_rn(OMEGA, uxEq * uzEq, T_OMEGA * mxz);
-    myz = __fmaf_rn(OMEGA, uyEq * uzEq, T_OMEGA * myz);
+    mxy = fma_rn(OMEGA, uxEq * uyEq, T_OMEGA * mxy);
+    mxz = fma_rn(OMEGA, uxEq * uzEq, T_OMEGA * mxz);
+    myz = fma_rn(OMEGA, uyEq * uzEq, T_OMEGA * myz);
 
     if constexpr (THERMAL_FORCE_ACTIVE)
     {
@@ -453,7 +431,6 @@ __global__ void collide(
             static_cast<real_t>(1) - static_cast<real_t>(0.5) * OMEGA_BULK;
 
         const real_t buoyancy =
-            THERMAL_RHO0 *
             BETA_THERMAL *
             THERMAL_FORCE_SCALE *
             (temperature - T_REF);

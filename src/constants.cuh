@@ -23,6 +23,10 @@
 
 // =================================================================================================== //
 
+struct D3Q7;
+struct D3Q19;
+struct D3Q27;
+
 using VelocitySet = D3Q27;
 using ThermalVelocitySet = D3Q27;
 using natural_t = uint32_t;
@@ -56,9 +60,9 @@ constexpr real_t THERMAL_GRAVITY_X = static_cast<real_t>(0);
 constexpr real_t THERMAL_GRAVITY_Y = static_cast<real_t>(0);
 constexpr real_t THERMAL_GRAVITY_Z = static_cast<real_t>(1);
 
-#define BLOCK_NX_VALUE 32
-#define BLOCK_NY_VALUE 4
-#define BLOCK_NZ_VALUE 4
+constexpr natural_t BLOCK_NX = 32;
+constexpr natural_t BLOCK_NY = 4;
+constexpr natural_t BLOCK_NZ = 4;
 
 // =================================================================================================== //
 
@@ -91,10 +95,6 @@ constexpr real_t OMEGA_THERMAL = static_cast<real_t>(static_cast<double>(1) / st
 constexpr real_t T_OMEGA_THERMAL = static_cast<real_t>(1.0) - OMEGA_THERMAL;
 
 // =================================================================================================== //
-
-constexpr natural_t BLOCK_NX = static_cast<natural_t>(BLOCK_NX_VALUE);
-constexpr natural_t BLOCK_NY = static_cast<natural_t>(BLOCK_NY_VALUE);
-constexpr natural_t BLOCK_NZ = static_cast<natural_t>(BLOCK_NZ_VALUE);
 
 constexpr natural_t GRID_X = (NX + BLOCK_NX - 1) / BLOCK_NX;
 constexpr natural_t GRID_Y = (NY + BLOCK_NY - 1) / BLOCK_NY;

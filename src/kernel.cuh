@@ -126,21 +126,21 @@ __device__ static __forceinline__ void accumulateDirection(
 
     const real_t gi = VelocitySet::w<Q>() * (sourceTemperature + cuT);
 
-    temperature += gi;
+    temp += gi;
 
     if constexpr (cx != 0)
     {
-        jx += gi * static_cast<real_t>(cx);
+        tux += gi * static_cast<real_t>(cx);
     }
 
     if constexpr (cy != 0)
     {
-        jy += gi * static_cast<real_t>(cy);
+        tuy += gi * static_cast<real_t>(cy);
     }
 
     if constexpr (cz != 0)
     {
-        jz += gi * static_cast<real_t>(cz);
+        tuz += gi * static_cast<real_t>(cz);
     }
 }
 
@@ -159,6 +159,12 @@ __global__ void streamCollide(
 
     const natural_t idx = global3(x, y, z);
     const uint8_t nodeType = boundaryMask(x, y, z);
+
+    if (nodeType == OUTFLOW)
+    {
+        copyOutflowMomentsFromLastPlane(moments, dbuffer, x, y, z, idx);
+        return;
+    }
 
     real_t rho = static_cast<real_t>(0);
     real_t ux = static_cast<real_t>(0);
@@ -223,70 +229,35 @@ __global__ void streamCollide(
     mxz *= VelocitySet::scaleIJ();
     myz *= VelocitySet::scaleIJ();
 
-    const real_t buoyancy = BETA_THERMAL * THERMAL_FORCE_SCALE * (temperature - T_REF);
+    const real_t buoyancy = BETA_THERMAL * THERMAL_FORCE_SCALE * (temp - T_REF);
     const real_t forceX = buoyancy * THERMAL_GRAVITY_X;
     const real_t forceY = buoyancy * THERMAL_GRAVITY_Y;
     const real_t forceZ = buoyancy * THERMAL_GRAVITY_Z;
 
-    const real_t uxEq = fma_rn(static_cast<real_t>(1.5) * invRho, forceX, ux);
-    const real_t uyEq = fma_rn(static_cast<real_t>(1.5) * invRho, forceY, uy);
-    const real_t uzEq = fma_rn(static_cast<real_t>(1.5) * invRho, forceZ, uz);
-
-    const real_t uxStore = fma_rn(VelocitySet::scaleI() * invRho, forceX, ux);
-    const real_t uyStore = fma_rn(VelocitySet::scaleI() * invRho, forceY, uy);
-    const real_t uzStore = fma_rn(VelocitySet::scaleI() * invRho, forceZ, uz);
-
-    const real_t eqXX = static_cast<real_t>(0.5) * uxEq * uxEq;
-    const real_t eqYY = static_cast<real_t>(0.5) * uyEq * uyEq;
-    const real_t eqZZ = static_cast<real_t>(0.5) * uzEq * uzEq;
+    const real_t uxEq = ux + static_cast<real_t>(1.5) * invRho * forceX;
+    const real_t uyEq = uy + static_cast<real_t>(1.5) * invRho * forceY;
+    const real_t uzEq = uz + static_cast<real_t>(1.5) * invRho * forceZ;
 
     const real_t trace = mxx + myy + mzz;
-    const real_t traceEq = eqXX + eqYY + eqZZ;
-
+    const real_t traceEq = static_cast<real_t>(0.5) * (uxEq * uxEq + uyEq * uyEq + uzEq * uzEq);
     const real_t traceThird = VelocitySet::cs2() * trace;
     const real_t traceEqThird = VelocitySet::cs2() * traceEq;
-
     const real_t tracePostThird = VelocitySet::cs2() * (T_OMEGA_BULK * trace + OMEGA_BULK * traceEq);
 
-    mxx = T_OMEGA_SHEAR * (mxx - traceThird) + OMEGA_SHEAR * (eqXX - traceEqThird) + tracePostThird;
-    myy = T_OMEGA_SHEAR * (myy - traceThird) + OMEGA_SHEAR * (eqYY - traceEqThird) + tracePostThird;
-    mzz = T_OMEGA_SHEAR * (mzz - traceThird) + OMEGA_SHEAR * (eqZZ - traceEqThird) + tracePostThird;
-    mxy = fma_rn(OMEGA_SHEAR, uxEq * uyEq, T_OMEGA_SHEAR * mxy);
-    mxz = fma_rn(OMEGA_SHEAR, uxEq * uzEq, T_OMEGA_SHEAR * mxz);
-    myz = fma_rn(OMEGA_SHEAR, uyEq * uzEq, T_OMEGA_SHEAR * myz);
-
-    const real_t sourceScale = VelocitySet::scaleI() * invRho;
-
-    mxx = fma_rn(TT_OMEGA_SHEAR, sourceScale * forceX * uxEq, mxx);
-    myy = fma_rn(TT_OMEGA_SHEAR, sourceScale * forceY * uyEq, myy);
-    mzz = fma_rn(TT_OMEGA_SHEAR, sourceScale * forceZ * uzEq, mzz);
-    mxy = fma_rn(TT_OMEGA_SHEAR, sourceScale * (forceX * uyEq + forceY * uxEq), mxy);
-    mxz = fma_rn(TT_OMEGA_SHEAR, sourceScale * (forceX * uzEq + forceZ * uxEq), mxz);
-    myz = fma_rn(TT_OMEGA_SHEAR, sourceScale * (forceY * uzEq + forceZ * uyEq), myz);
-
-    const real_t uxThermal = uxEq * VelocitySet::cs2();
-    const real_t uyThermal = uyEq * VelocitySet::cs2();
-    const real_t uzThermal = uzEq * VelocitySet::cs2();
-
-    const real_t temperatureOld = temperature;
-    temperature = temperatureOld + THERMAL_SOURCE_VALUE;
-
-    jx = VelocitySet::as2() * (T_OMEGA_THERMAL * jx + OMEGA_THERMAL * temperatureOld * uxThermal + THERMAL_SOURCE_VALUE * uxThermal);
-    jy = VelocitySet::as2() * (T_OMEGA_THERMAL * jy + OMEGA_THERMAL * temperatureOld * uyThermal + THERMAL_SOURCE_VALUE * uyThermal);
-    jz = VelocitySet::as2() * (T_OMEGA_THERMAL * jz + OMEGA_THERMAL * temperatureOld * uzThermal + THERMAL_SOURCE_VALUE * uzThermal);
+    const real_t sourceScale = TT_OMEGA_SHEAR * VelocitySet::scaleI() * invRho;
 
     dbuffer[midx(idx, RHO)] = rho;
-    dbuffer[midx(idx, UX)] = uxStore;
-    dbuffer[midx(idx, UY)] = uyStore;
-    dbuffer[midx(idx, UZ)] = uzStore;
-    dbuffer[midx(idx, MXX)] = mxx;
-    dbuffer[midx(idx, MYY)] = myy;
-    dbuffer[midx(idx, MZZ)] = mzz;
-    dbuffer[midx(idx, MXY)] = mxy;
-    dbuffer[midx(idx, MXZ)] = mxz;
-    dbuffer[midx(idx, MYZ)] = myz;
-    dbuffer[midx(idx, TEMP)] = temperature;
-    dbuffer[midx(idx, TUX)] = jx;
-    dbuffer[midx(idx, TUY)] = jy;
-    dbuffer[midx(idx, TUZ)] = jz;
+    dbuffer[midx(idx, UX)] = ux + VelocitySet::scaleI() * invRho * forceX;
+    dbuffer[midx(idx, UY)] = uy + VelocitySet::scaleI() * invRho * forceY;
+    dbuffer[midx(idx, UZ)] = uz + VelocitySet::scaleI() * invRho * forceZ;
+    dbuffer[midx(idx, MXX)] = T_OMEGA_SHEAR * (mxx - traceThird) + OMEGA_SHEAR * (static_cast<real_t>(0.5) * uxEq * uxEq - traceEqThird) + tracePostThird + sourceScale * forceX * uxEq;
+    dbuffer[midx(idx, MYY)] = T_OMEGA_SHEAR * (myy - traceThird) + OMEGA_SHEAR * (static_cast<real_t>(0.5) * uyEq * uyEq - traceEqThird) + tracePostThird + sourceScale * forceY * uyEq;
+    dbuffer[midx(idx, MZZ)] = T_OMEGA_SHEAR * (mzz - traceThird) + OMEGA_SHEAR * (static_cast<real_t>(0.5) * uzEq * uzEq - traceEqThird) + tracePostThird + sourceScale * forceZ * uzEq;
+    dbuffer[midx(idx, MXY)] = T_OMEGA_SHEAR * mxy + OMEGA_SHEAR * uxEq * uyEq + sourceScale * (forceX * uyEq + forceY * uxEq);
+    dbuffer[midx(idx, MXZ)] = T_OMEGA_SHEAR * mxz + OMEGA_SHEAR * uxEq * uzEq + sourceScale * (forceX * uzEq + forceZ * uxEq);
+    dbuffer[midx(idx, MYZ)] = T_OMEGA_SHEAR * myz + OMEGA_SHEAR * uyEq * uzEq + sourceScale * (forceY * uzEq + forceZ * uyEq);
+    dbuffer[midx(idx, TEMP)] = temp + THERMAL_SOURCE_VALUE;
+    dbuffer[midx(idx, TUX)] = VelocitySet::as2() * (T_OMEGA_THERMAL * tux + OMEGA_THERMAL * temp * uxEq * VelocitySet::cs2() + THERMAL_SOURCE_VALUE * uxEq * VelocitySet::cs2());
+    dbuffer[midx(idx, TUY)] = VelocitySet::as2() * (T_OMEGA_THERMAL * tuy + OMEGA_THERMAL * temp * uyEq * VelocitySet::cs2() + THERMAL_SOURCE_VALUE * uyEq * VelocitySet::cs2());
+    dbuffer[midx(idx, TUZ)] = VelocitySet::as2() * (T_OMEGA_THERMAL * tuz + OMEGA_THERMAL * temp * uzEq * VelocitySet::cs2() + THERMAL_SOURCE_VALUE * uzEq * VelocitySet::cs2());
 }

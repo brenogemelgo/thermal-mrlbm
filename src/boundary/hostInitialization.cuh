@@ -7,7 +7,7 @@
 template <unsigned int nodeTypeValue>
 __host__ [[nodiscard]] static inline constexpr bool isValidBoundaryTypeConst() noexcept
 {
-    return nodeTypeValue == WALL;
+    return nodeTypeValue == WALL || nodeTypeValue == INLET;
 }
 
 __host__ static inline void boundaryVelocityHost(
@@ -16,10 +16,9 @@ __host__ static inline void boundaryVelocityHost(
     real_t &uby,
     real_t &ubz) noexcept
 {
-    (void)nodeType;
     ubx = static_cast<real_t>(0);
     uby = static_cast<real_t>(0);
-    ubz = static_cast<real_t>(0);
+    ubz = nodeType == INLET ? U_CHAR : static_cast<real_t>(0);
 }
 
 __host__ static inline void invertIRBCMatrix(
@@ -266,11 +265,8 @@ __host__ [[nodiscard]] static inline cudaError_t initIRBCBoundaryTables() noexce
 {
     real_t hostTable[IRBC_TABLE_SIZE] = {};
 
-    constexpr_for<0, 64>(
-        [&](const auto nodeTypeConst) noexcept
-        {
-            fillIRBCBoundaryTableEntry<nodeTypeConst>(hostTable);
-        });
+    fillIRBCBoundaryTableEntry<WALL>(hostTable);
+    fillIRBCBoundaryTableEntry<INLET>(hostTable);
 
     return cudaMemcpyToSymbol(IRBC_INVERSE, hostTable, sizeof(hostTable));
 }

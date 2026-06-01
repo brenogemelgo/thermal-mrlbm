@@ -42,7 +42,51 @@ __device__ static __forceinline__ void boundaryVelocityConst(
 {
     ubx = static_cast<real_t>(0);
     uby = static_cast<real_t>(0);
-    ubz = static_cast<real_t>(0);
+    ubz = nodeTypeValue == INLET ? U_CHAR : static_cast<real_t>(0);
+}
+
+// ===================================================================================================================== //
+
+__device__ static __forceinline__ void copyOutflowMomentsFromLastPlane(
+    const real_t *__restrict__ moments,
+    real_t *__restrict__ dbuffer,
+    const natural_t x,
+    const natural_t y,
+    const natural_t z,
+    const natural_t idx) noexcept
+{
+    const natural_t src = global3(x, y, z - 1u);
+
+#pragma unroll
+    for (natural_t moment = 0; moment < NUM_MOMENTS; ++moment)
+    {
+        dbuffer[midx(idx, moment)] = loadMoment(moments, src, moment);
+    }
+}
+
+// ===================================================================================================================== //
+
+template <unsigned int nodeTypeValue>
+__device__ static __forceinline__ void applyThermalBoundaryTyped(
+    real_t &temp,
+    real_t &tux,
+    real_t &tuy,
+    real_t &tuz) noexcept
+{
+    if constexpr (nodeTypeValue == INLET)
+    {
+        temp = T_HOT;
+        tux = static_cast<real_t>(0);
+        tuy = static_cast<real_t>(0);
+        tuz = T_HOT * U_CHAR;
+    }
+    else
+    {
+        temp = T_COLD;
+        tux = static_cast<real_t>(0);
+        tuy = static_cast<real_t>(0);
+        tuz = static_cast<real_t>(0);
+    }
 }
 
 // ===================================================================================================================== //
@@ -144,12 +188,21 @@ __device__ static __forceinline__ void dispatchIRBCBoundary(
     real_t &mzz,
     real_t &mxy,
     real_t &mxz,
-    real_t &myz) noexcept
+    real_t &myz,
+    real_t &temp,
+    real_t &tux,
+    real_t &tuy,
+    real_t &tuz) noexcept
 {
     switch (nodeType)
     {
     case WALL:
-        applyIRBCBoundaryTyped<BACK_FACE>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
+        applyIRBCBoundaryTyped<WALL>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
+        applyThermalBoundaryTyped<WALL>(temp, tux, tuy, tuz);
+        return;
+    case INLET:
+        applyIRBCBoundaryTyped<INLET>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
+        applyThermalBoundaryTyped<INLET>(temp, tux, tuy, tuz);
         return;
     default:
         __builtin_unreachable();

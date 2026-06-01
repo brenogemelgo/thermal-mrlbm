@@ -4,11 +4,13 @@
 
 constexpr uint8_t BULK = 0u;
 constexpr uint8_t BACK = 1u << 4;
+constexpr uint8_t FRONT = 1u << 5;
 constexpr uint8_t BACK_FACE = BACK;
+constexpr uint8_t FRONT_FACE = FRONT;
 
 constexpr uint8_t WALL = BACK_FACE;
-constexpr uint8_t INLET = 1u << 6;
-constexpr uint8_t OUTFLOW = 1u << 7;
+constexpr uint8_t INLET = BACK_FACE | (1u << 6);
+constexpr uint8_t OUTFLOW = FRONT_FACE | (1u << 7);
 
 __device__ [[nodiscard]] static __forceinline__ bool isJetInlet(
     const natural_t x,

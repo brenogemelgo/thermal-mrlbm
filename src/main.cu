@@ -92,8 +92,7 @@ int main(int argc, char **argv)
     constexpr dim3 block(BLOCK_NX, BLOCK_NY, BLOCK_NZ);
     constexpr dim3 grid(GRID_X, GRID_Y, GRID_Z);
 
-    CUDA_CHECK(cudaFuncSetCacheConfig(stream, cudaFuncCachePreferL1));
-    CUDA_CHECK(cudaFuncSetCacheConfig(collide, cudaFuncCachePreferL1));
+    CUDA_CHECK(cudaFuncSetCacheConfig(streamCollide, cudaFuncCachePreferL1));
     CUDA_CHECK(initIRBCBoundaryTables());
 
     natural_t startStep = 0;

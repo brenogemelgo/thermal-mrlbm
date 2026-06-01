@@ -119,7 +119,6 @@ int main(int argc, char **argv)
     std::cout << "case id: " << caseId << std::endl;
     std::cout << "output: " << getSimulationOutputDirectory() << std::endl;
 
-    printThermalDiagnosticsHeader();
     const auto start = std::chrono::high_resolution_clock::now();
 #ifndef BENCHMARK
     auto lastStamp = start;
@@ -147,8 +146,6 @@ int main(int argc, char **argv)
             std::cout << "MLUPS: " << stampMlups << std::endl;
 
             writeOutput(moments, t + 1);
-            const ThermalDiagnostics diagnostics = computeThermalDiagnostics(moments);
-            printThermalDiagnosticsLine(t + 1, diagnostics);
 
             lastStamp = std::chrono::high_resolution_clock::now();
             lastStampStep = t + 1;

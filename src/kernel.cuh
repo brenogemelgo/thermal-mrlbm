@@ -231,7 +231,7 @@ __global__ void streamCollide(
     tuy *= VelocitySet::scaleI();
     tuz *= VelocitySet::scaleI();
 
-    const real_t buoyancy = BETA_THERMAL * THERMAL_FORCE_SCALE * (temp - T_REF);
+    const real_t buoyancy = (nodeType == BULK) ? BETA_THERMAL * THERMAL_FORCE_SCALE * (temp - T_REF) : static_cast<real_t>(0);
     const real_t forceX = buoyancy * THERMAL_GRAVITY_X;
     const real_t forceY = buoyancy * THERMAL_GRAVITY_Y;
     const real_t forceZ = buoyancy * THERMAL_GRAVITY_Z;

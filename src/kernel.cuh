@@ -47,10 +47,9 @@ __device__ static __forceinline__ void accumulateDirection(
         cu += static_cast<real_t>(cz) * loadMoment(moments, src, UZ);
     }
 
-    real_t mh =
-        loadMoment(moments, src, MXX) * VelocitySet::hxx<Q>() +
-        loadMoment(moments, src, MYY) * VelocitySet::hyy<Q>() +
-        loadMoment(moments, src, MZZ) * VelocitySet::hzz<Q>();
+    real_t mh = loadMoment(moments, src, MXX) * VelocitySet::hxx<Q>() +
+                loadMoment(moments, src, MYY) * VelocitySet::hyy<Q>() +
+                loadMoment(moments, src, MZZ) * VelocitySet::hzz<Q>();
 
     if constexpr (cx * cy != 0)
     {
@@ -228,6 +227,9 @@ __global__ void streamCollide(
     mxy *= VelocitySet::scaleIJ();
     mxz *= VelocitySet::scaleIJ();
     myz *= VelocitySet::scaleIJ();
+    tux *= VelocitySet::scaleI();
+    tuy *= VelocitySet::scaleI();
+    tuz *= VelocitySet::scaleI();
 
     const real_t buoyancy = BETA_THERMAL * THERMAL_FORCE_SCALE * (temp - T_REF);
     const real_t forceX = buoyancy * THERMAL_GRAVITY_X;
@@ -257,7 +259,7 @@ __global__ void streamCollide(
     dbuffer[midx(idx, MXZ)] = T_OMEGA_SHEAR * mxz + OMEGA_SHEAR * uxEq * uzEq + sourceScale * (forceX * uzEq + forceZ * uxEq);
     dbuffer[midx(idx, MYZ)] = T_OMEGA_SHEAR * myz + OMEGA_SHEAR * uyEq * uzEq + sourceScale * (forceY * uzEq + forceZ * uyEq);
     dbuffer[midx(idx, TEMP)] = temp + THERMAL_SOURCE_VALUE;
-    dbuffer[midx(idx, TUX)] = VelocitySet::as2() * (T_OMEGA_THERMAL * tux + OMEGA_THERMAL * temp * uxEq * VelocitySet::cs2() + THERMAL_SOURCE_VALUE * uxEq * VelocitySet::cs2());
-    dbuffer[midx(idx, TUY)] = VelocitySet::as2() * (T_OMEGA_THERMAL * tuy + OMEGA_THERMAL * temp * uyEq * VelocitySet::cs2() + THERMAL_SOURCE_VALUE * uyEq * VelocitySet::cs2());
-    dbuffer[midx(idx, TUZ)] = VelocitySet::as2() * (T_OMEGA_THERMAL * tuz + OMEGA_THERMAL * temp * uzEq * VelocitySet::cs2() + THERMAL_SOURCE_VALUE * uzEq * VelocitySet::cs2());
+    dbuffer[midx(idx, TUX)] = T_OMEGA_THERMAL * tux + OMEGA_THERMAL * temp * uxEq + THERMAL_SOURCE_VALUE * uxEq;
+    dbuffer[midx(idx, TUY)] = T_OMEGA_THERMAL * tuy + OMEGA_THERMAL * temp * uyEq + THERMAL_SOURCE_VALUE * uyEq;
+    dbuffer[midx(idx, TUZ)] = T_OMEGA_THERMAL * tuz + OMEGA_THERMAL * temp * uzEq + THERMAL_SOURCE_VALUE * uzEq;
 }

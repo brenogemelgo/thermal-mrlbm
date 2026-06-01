@@ -57,11 +57,11 @@ __device__ static __forceinline__ void copyOutflowMomentsFromLastPlane(
 {
     const natural_t src = global3(x, y, z - 1u);
 
-#pragma unroll
-    for (natural_t moment = 0; moment < NUM_MOMENTS; ++moment)
-    {
-        dbuffer[midx(idx, moment)] = loadMoment(moments, src, moment);
-    }
+    constexpr_for<0, NUM_MOMENTS>(
+        [&](const auto moment) noexcept
+        {
+            dbuffer[midx(idx, moment)] = loadMoment(moments, src, moment);
+        });
 }
 
 // ===================================================================================================================== //

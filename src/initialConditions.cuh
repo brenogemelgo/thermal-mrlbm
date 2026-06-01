@@ -36,9 +36,9 @@ __global__ void jetInit(
     moments[midx(idx, MXZ)] = uxCoeff * uzCoeff;
     moments[midx(idx, MYZ)] = uyCoeff * uzCoeff;
     moments[midx(idx, TEMP)] = temperature;
-    moments[midx(idx, TFX)] = static_cast<real_t>(0);
-    moments[midx(idx, TFY)] = static_cast<real_t>(0);
-    moments[midx(idx, TFZ)] = inlet ? temperature * U_CHAR * invThermalCs2 : static_cast<real_t>(0);
+    moments[midx(idx, TUX)] = static_cast<real_t>(0);
+    moments[midx(idx, TUY)] = static_cast<real_t>(0);
+    moments[midx(idx, TUZ)] = inlet ? temperature * U_CHAR * invThermalCs2 : static_cast<real_t>(0);
 
     for (natural_t k = 0; k < NUM_MOMENTS; ++k)
     {

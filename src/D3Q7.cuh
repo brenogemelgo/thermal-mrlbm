@@ -2,7 +2,7 @@
 
 #include "constants.cuh"
 
-struct ThermalVelocitySet
+struct D3Q7
 {
     __device__ __host__ [[nodiscard]] static __forceinline__ consteval natural_t Q() noexcept
     {

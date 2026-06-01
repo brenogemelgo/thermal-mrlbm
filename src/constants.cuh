@@ -21,10 +21,10 @@
 #include <stdexcept>
 #include <string>
 
-#define D3Q27
-
 // =================================================================================================== //
 
+using VelocitySet = D3Q27;
+using ThermalVelocitySet = D3Q27;
 using natural_t = uint32_t;
 using real_t = float;
 
@@ -119,8 +119,8 @@ constexpr natural_t MXY = 7;
 constexpr natural_t MXZ = 8;
 constexpr natural_t MYZ = 9;
 constexpr natural_t TEMP = 10;
-constexpr natural_t TFX = 11;
-constexpr natural_t TFY = 12;
-constexpr natural_t TFZ = 13;
+constexpr natural_t TUX = 11;
+constexpr natural_t TUY = 12;
+constexpr natural_t TUZ = 13;
 
 // =================================================================================================== //

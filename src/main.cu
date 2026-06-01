@@ -129,8 +129,8 @@ int main(int argc, char **argv)
 
     for (natural_t t = startStep; t < NSTEPS; ++t)
     {
-        stream<<<grid, block>>>(moments, dbuffer);
-        collide<<<grid, block>>>(moments, dbuffer);
+        streamCollide<<<grid, block>>>(moments, dbuffer);
+        std::swap(moments, dbuffer);
 
 #ifndef BENCHMARK
         if ((t + 1) % STAMP == 0)

@@ -1,10 +1,8 @@
 #pragma once
 
-#ifdef D3Q19
+#include "D3Q7.cuh"
 #include "D3Q19.cuh"
-#elif defined(D3Q27)
 #include "D3Q27.cuh"
-#endif
 
 __device__ [[nodiscard]] static __forceinline__ natural_t global3(
     const natural_t x,

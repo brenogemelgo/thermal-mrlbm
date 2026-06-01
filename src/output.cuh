@@ -53,11 +53,11 @@ static inline const char *outputMomentName(const natural_t field)
         return "myz";
     case TEMP:
         return "temperature";
-    case TFX:
+    case TUX:
         return "thermal_flux_x";
-    case TFY:
+    case TUY:
         return "thermal_flux_y";
-    case TFZ:
+    case TUZ:
         return "thermal_flux_z";
     default:
         return "unknown";

@@ -2,9 +2,7 @@
 
 #include "constants.cuh"
 
-#ifdef D3Q19
-
-struct VelocitySet
+struct D3Q19
 {
     __device__ __host__ [[nodiscard]] static __forceinline__ consteval natural_t Q() noexcept
     {
@@ -145,5 +143,3 @@ struct VelocitySet
         return as2() * as2();
     }
 };
-
-#endif

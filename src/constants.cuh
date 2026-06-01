@@ -38,16 +38,16 @@ constexpr natural_t NX = 128;
 constexpr natural_t NY = 128;
 constexpr natural_t NZ = 512;
 
-constexpr real_t REYNOLDS = static_cast<real_t>(3000);
-constexpr real_t U_CHAR = static_cast<real_t>(0.05);
+constexpr real_t REYNOLDS = static_cast<real_t>(1000);
+constexpr real_t U_CHAR = static_cast<real_t>(0.0256);
 constexpr real_t L_CHAR = static_cast<real_t>(24);
 
 constexpr natural_t NSTEPS = 100000;
 constexpr natural_t STAMP = 1000;
 
-constexpr real_t BULK_RELAXATION_FACTOR = static_cast<real_t>(0.75);
+constexpr real_t BULK_VISCOSITY_FACTOR = static_cast<real_t>(50);
 
-constexpr real_t PRANDTL = static_cast<real_t>(0.71);
+constexpr real_t PRANDTL = static_cast<real_t>(0.5);
 
 constexpr real_t T_COLD = static_cast<real_t>(0);
 constexpr real_t T_HOT = static_cast<real_t>(1);
@@ -80,7 +80,7 @@ constexpr real_t T_OMEGA_SHEAR = static_cast<real_t>(1.0) - OMEGA_SHEAR;
 constexpr real_t OMEGA_D2_SHEAR = static_cast<real_t>(0.5) * OMEGA_SHEAR;
 constexpr real_t TT_OMEGA_SHEAR = static_cast<real_t>(1.0) - OMEGA_D2_SHEAR;
 
-constexpr real_t TAU_BULK = static_cast<real_t>(0.5) + BULK_RELAXATION_FACTOR * (TAU_SHEAR - static_cast<real_t>(0.5));
+constexpr real_t TAU_BULK = static_cast<real_t>(0.5) + BULK_VISCOSITY_FACTOR * (TAU_SHEAR - static_cast<real_t>(0.5));
 constexpr real_t OMEGA_BULK = static_cast<real_t>(static_cast<double>(1) / static_cast<double>(TAU_BULK));
 constexpr real_t T_OMEGA_BULK = static_cast<real_t>(1.0) - OMEGA_BULK;
 constexpr real_t OMEGA_D2_BULK = static_cast<real_t>(0.5) * OMEGA_BULK;
@@ -90,7 +90,7 @@ constexpr real_t TT_OMEGA_BULK = static_cast<real_t>(1.0) - OMEGA_D2_BULK;
 
 constexpr real_t THERMAL_FORCE_SCALE = static_cast<real_t>((static_cast<double>(U_CHAR) * static_cast<double>(U_CHAR)) / static_cast<double>(L_CHAR));
 constexpr real_t THERMAL_DIFFUSIVITY = VISCOSITY / PRANDTL;
-constexpr real_t TAU_THERMAL = static_cast<real_t>(0.5) + THERMAL_DIFFUSIVITY * static_cast<real_t>(4.0);
+constexpr real_t TAU_THERMAL = static_cast<real_t>(0.5) + THERMAL_DIFFUSIVITY * static_cast<real_t>(3.0);
 constexpr real_t OMEGA_THERMAL = static_cast<real_t>(static_cast<double>(1) / static_cast<double>(TAU_THERMAL));
 constexpr real_t T_OMEGA_THERMAL = static_cast<real_t>(1.0) - OMEGA_THERMAL;
 

@@ -34,12 +34,12 @@ using real_t = float;
 
 // =================================================================================================== //
 
-constexpr natural_t NX = 128;
-constexpr natural_t NY = 128;
-constexpr natural_t NZ = 512;
+constexpr natural_t NX = 220;
+constexpr natural_t NY = 220;
+constexpr natural_t NZ = 440;
 
-constexpr real_t REYNOLDS = static_cast<real_t>(1000);
-constexpr real_t U_CHAR = static_cast<real_t>(0.0256);
+constexpr real_t REYNOLDS = static_cast<real_t>(3000);
+constexpr real_t U_CHAR = static_cast<real_t>(0.05);
 constexpr real_t L_CHAR = static_cast<real_t>(24);
 
 constexpr natural_t NSTEPS = 100000;
@@ -59,6 +59,29 @@ constexpr real_t THERMAL_SOURCE_VALUE = static_cast<real_t>(0);
 constexpr real_t THERMAL_GRAVITY_X = static_cast<real_t>(0);
 constexpr real_t THERMAL_GRAVITY_Y = static_cast<real_t>(0);
 constexpr real_t THERMAL_GRAVITY_Z = static_cast<real_t>(1);
+
+constexpr bool ENABLE_SMOOTH_JET_PROFILE = false;
+constexpr real_t JET_AMBIENT_UZ = static_cast<real_t>(0);
+constexpr real_t JET_INLET_SHEAR_THICKNESS_CELLS = static_cast<real_t>(2);
+constexpr real_t JET_INLET_HALO_THICKNESS_CELLS = static_cast<real_t>(2) * JET_INLET_SHEAR_THICKNESS_CELLS;
+constexpr bool SMOOTH_INLET_TEMPERATURE = true;
+
+constexpr bool ENABLE_SYNTHETIC_TURBULENT_INFLOW = true;
+
+constexpr natural_t TURBULENT_INFLOW_MODES = 16;
+constexpr real_t TURBULENT_INFLOW_INTENSITY_RADIAL = static_cast<real_t>(0.04);
+constexpr real_t TURBULENT_INFLOW_INTENSITY_AZIMUTHAL = static_cast<real_t>(0.04);
+constexpr real_t TURBULENT_INFLOW_INTENSITY_AXIAL = static_cast<real_t>(0.025);
+
+constexpr real_t TURBULENT_INFLOW_LMIN_CELLS = static_cast<real_t>(3);
+constexpr real_t TURBULENT_INFLOW_LMAX_DIAM = static_cast<real_t>(0.75);
+constexpr real_t TURBULENT_INFLOW_CONVECTION_SPEED = U_CHAR;
+
+constexpr natural_t TURBULENT_INFLOW_ENVELOPE_MODE = 0;
+constexpr real_t TURBULENT_INFLOW_MAX_PERTURBATION = static_cast<real_t>(0.35) * U_CHAR;
+
+constexpr natural_t TURBULENT_INFLOW_SEED = 1337u;
+constexpr natural_t TURBULENT_INFLOW_DIAGNOSTIC_STEPS = 8u;
 
 constexpr natural_t BLOCK_NX = 32;
 constexpr natural_t BLOCK_NY = 4;

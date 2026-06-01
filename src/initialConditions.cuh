@@ -1,8 +1,8 @@
 #pragma once
 
 #include "D3Q7.cuh"
-#include "bitmasks.cuh"
 #include "deviceFunctions.cuh"
+#include "syntheticInflow.cuh"
 
 __global__ void jetInit(
     real_t *moments,
@@ -19,10 +19,34 @@ __global__ void jetInit(
 
     const natural_t idx = global3(x, y, z);
     const bool inlet = isJetInlet(x, y, z);
-    const real_t uxCoeff = static_cast<real_t>(0);
-    const real_t uyCoeff = static_cast<real_t>(0);
-    const real_t uzCoeff = inlet ? U_CHAR * VelocitySet::scaleI() : static_cast<real_t>(0);
-    const real_t temperature = inlet ? T_HOT : T_COLD;
+    const real_t profile = inlet ? jetInletProfile(x, y) : static_cast<real_t>(0);
+    const real_t envelope = turbulentInflowEnvelope(profile);
+
+    real_t uxRaw = static_cast<real_t>(0);
+    real_t uyRaw = static_cast<real_t>(0);
+    real_t uzRaw = inlet ? smoothJetMeanUz(profile) : static_cast<real_t>(0);
+
+    if (inlet)
+    {
+        real_t duX;
+        real_t duY;
+        real_t duZ;
+        syntheticTurbulentInflowVelocity(x, y, 0u, envelope, duX, duY, duZ);
+
+        uxRaw = duX;
+        uyRaw = duY;
+        uzRaw += duZ;
+
+        if (uzRaw < static_cast<real_t>(0))
+        {
+            uzRaw = static_cast<real_t>(0);
+        }
+    }
+
+    const real_t uxCoeff = uxRaw * VelocitySet::scaleI();
+    const real_t uyCoeff = uyRaw * VelocitySet::scaleI();
+    const real_t uzCoeff = uzRaw * VelocitySet::scaleI();
+    const real_t temperature = inlet ? smoothJetTemperature(profile) : T_COLD;
     const real_t invThermalCs2 = ThermalVelocitySet::as2();
 
     moments[midx(idx, RHO)] = static_cast<real_t>(1);
@@ -36,9 +60,9 @@ __global__ void jetInit(
     moments[midx(idx, MXZ)] = uxCoeff * uzCoeff;
     moments[midx(idx, MYZ)] = uyCoeff * uzCoeff;
     moments[midx(idx, TEMP)] = temperature;
-    moments[midx(idx, TUX)] = static_cast<real_t>(0);
-    moments[midx(idx, TUY)] = static_cast<real_t>(0);
-    moments[midx(idx, TUZ)] = inlet ? temperature * U_CHAR * invThermalCs2 : static_cast<real_t>(0);
+    moments[midx(idx, TUX)] = temperature * uxRaw * invThermalCs2;
+    moments[midx(idx, TUY)] = temperature * uyRaw * invThermalCs2;
+    moments[midx(idx, TUZ)] = temperature * uzRaw * invThermalCs2;
 
     for (natural_t k = 0; k < NUM_MOMENTS; ++k)
     {

@@ -145,7 +145,8 @@ __device__ static __forceinline__ void accumulateDirection(
 
 __global__ void streamCollide(
     const real_t *__restrict__ moments,
-    real_t *__restrict__ dbuffer)
+    real_t *__restrict__ dbuffer,
+    const natural_t step)
 {
     const natural_t x = blockIdx.x * BLOCK_NX + threadIdx.x;
     const natural_t y = blockIdx.y * BLOCK_NY + threadIdx.y;
@@ -185,6 +186,7 @@ __global__ void streamCollide(
         dispatchIRBCBoundary(
             moments,
             x, y, z,
+            step,
             nodeType,
             rho, ux, uy, uz,
             mxx, myy, mzz, mxy, mxz, myz,

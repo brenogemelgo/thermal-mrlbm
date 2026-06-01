@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../syntheticInflow.cuh"
 #include "helpers.cuh"
 
 // ===================================================================================================================== //
@@ -68,25 +69,22 @@ __device__ static __forceinline__ void copyOutflowMomentsFromLastPlane(
 
 template <unsigned int nodeTypeValue>
 __device__ static __forceinline__ void applyThermalBoundaryTyped(
+    const real_t ux,
+    const real_t uy,
+    const real_t uz,
     real_t &temp,
     real_t &tux,
     real_t &tuy,
     real_t &tuz) noexcept
 {
-    if constexpr (nodeTypeValue == INLET)
-    {
-        temp = T_HOT;
-        tux = static_cast<real_t>(0);
-        tuy = static_cast<real_t>(0);
-        tuz = T_HOT * U_CHAR;
-    }
-    else
-    {
-        temp = T_COLD;
-        tux = static_cast<real_t>(0);
-        tuy = static_cast<real_t>(0);
-        tuz = static_cast<real_t>(0);
-    }
+    (void)ux;
+    (void)uy;
+    (void)uz;
+
+    temp = T_COLD;
+    tux = static_cast<real_t>(0);
+    tuy = static_cast<real_t>(0);
+    tuz = static_cast<real_t>(0);
 }
 
 // ===================================================================================================================== //
@@ -178,6 +176,7 @@ __device__ static __forceinline__ void dispatchIRBCBoundary(
     const natural_t x,
     const natural_t y,
     const natural_t z,
+    const natural_t step,
     const unsigned int nodeType,
     real_t &rho,
     real_t &ux,
@@ -198,11 +197,39 @@ __device__ static __forceinline__ void dispatchIRBCBoundary(
     {
     case WALL:
         applyIRBCBoundaryTyped<WALL>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        applyThermalBoundaryTyped<WALL>(temp, tux, tuy, tuz);
+        applyThermalBoundaryTyped<WALL>(ux, uy, uz, temp, tux, tuy, tuz);
         return;
     case INLET:
         applyIRBCBoundaryTyped<INLET>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        applyThermalBoundaryTyped<INLET>(temp, tux, tuy, tuz);
+        {
+            const real_t profile = jetInletProfile(x, y);
+            const real_t envelope = turbulentInflowEnvelope(profile);
+            const real_t uzMean = smoothJetMeanUz(profile);
+            const real_t inletTemperature = smoothJetTemperature(profile);
+
+            real_t duX = static_cast<real_t>(0);
+            real_t duY = static_cast<real_t>(0);
+            real_t duZ = static_cast<real_t>(0);
+
+            if constexpr (ENABLE_SYNTHETIC_TURBULENT_INFLOW)
+            {
+                syntheticTurbulentInflowVelocity(x, y, step, envelope, duX, duY, duZ);
+            }
+
+            ux = duX;
+            uy = duY;
+            uz = uzMean + duZ;
+
+            if (uz < static_cast<real_t>(0))
+            {
+                uz = static_cast<real_t>(0);
+            }
+
+            temp = inletTemperature;
+            tux = temp * ux;
+            tuy = temp * uy;
+            tuz = temp * uz;
+        }
         return;
     default:
         __builtin_unreachable();

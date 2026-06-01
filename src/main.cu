@@ -37,6 +37,7 @@ static bool isValidCaseId(
 int main(int argc, char **argv)
 {
     bool continueFromCheckpoint = false;
+    bool inletTurbulenceDiagnostics = false;
     std::string caseId = "default";
 
     for (int arg = 1; arg < argc; ++arg)
@@ -46,6 +47,10 @@ int main(int argc, char **argv)
         if (argument == "--continue" || argument == "continue")
         {
             continueFromCheckpoint = true;
+        }
+        else if (argument == "--inlet-turbulence-diagnostics")
+        {
+            inletTurbulenceDiagnostics = true;
         }
         else if (argument == "--case-id")
         {
@@ -75,6 +80,12 @@ int main(int argc, char **argv)
     {
         std::cerr << "Invalid case id: " << caseId << std::endl;
         return EXIT_FAILURE;
+    }
+
+    if (inletTurbulenceDiagnostics)
+    {
+        printSyntheticTurbulentInflowDiagnostics();
+        return EXIT_SUCCESS;
     }
 
     setSimulationOutputDirectory(std::filesystem::path("output") / caseId);
@@ -127,7 +138,7 @@ int main(int argc, char **argv)
 
     for (natural_t t = startStep; t < NSTEPS; ++t)
     {
-        streamCollide<<<grid, block>>>(moments, dbuffer);
+        streamCollide<<<grid, block>>>(moments, dbuffer, t);
         std::swap(moments, dbuffer);
 
 #ifndef BENCHMARK

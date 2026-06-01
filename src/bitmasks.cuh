@@ -29,7 +29,10 @@ __device__ [[nodiscard]] static __forceinline__ bool isJetInlet(
     const real_t dy = static_cast<real_t>(y) - cy0;
 
     const real_t r2 = dx * dx + dy * dy;
-    constexpr real_t radius2 = RADIUS * RADIUS;
+    constexpr real_t inletRadius = ENABLE_SMOOTH_JET_PROFILE
+                                       ? RADIUS + JET_INLET_HALO_THICKNESS_CELLS
+                                       : RADIUS;
+    constexpr real_t radius2 = inletRadius * inletRadius;
 
     return r2 <= radius2;
 }

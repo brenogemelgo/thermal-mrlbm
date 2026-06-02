@@ -3,7 +3,12 @@
 #include "kernel.cuh"
 #include "output.cuh"
 
+// #define STATISTICS
 // #define BENCHMARK
+
+#ifdef STATISTICS
+#include "statistics.cuh"
+#endif
 
 #define CUDA_CHECK(call)                                                         \
     do                                                                           \
@@ -130,6 +135,17 @@ int main(int argc, char **argv)
     std::cout << "case id: " << caseId << std::endl;
     std::cout << "output: " << getSimulationOutputDirectory() << std::endl;
 
+#ifndef BENCHMARK
+    writeOutput(moments, startStep);
+#endif
+
+#ifdef STATISTICS
+    JetStatisticsAccumulator statisticsAccumulator;
+    natural_t statisticsSampleCount = 0;
+    accumulateStatisticsSample(statisticsAccumulator, moments);
+    ++statisticsSampleCount;
+#endif
+
     const auto start = std::chrono::high_resolution_clock::now();
 #ifndef BENCHMARK
     auto lastStamp = start;
@@ -140,6 +156,11 @@ int main(int argc, char **argv)
     {
         streamCollide<<<grid, block>>>(moments, dbuffer, t);
         std::swap(moments, dbuffer);
+
+#ifdef STATISTICS
+        accumulateStatisticsSample(statisticsAccumulator, moments);
+        ++statisticsSampleCount;
+#endif
 
 #ifndef BENCHMARK
         if ((t + 1) % STAMP == 0)
@@ -174,6 +195,10 @@ int main(int argc, char **argv)
     std::cout << std::endl;
     std::cout << "elapsed: " << elapsed.count() << " s" << std::endl;
     std::cout << "MLUPS: " << mlups << std::endl;
+
+#ifdef STATISTICS
+    writeStatisticsOutput(statisticsAccumulator, statisticsSampleCount, startStep, NSTEPS);
+#endif
 
     CUDA_CHECK(cudaFree(momentsAlloc));
     CUDA_CHECK(cudaFree(dbufferAlloc));

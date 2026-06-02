@@ -60,6 +60,24 @@ __device__ [[nodiscard]] static __forceinline__ real_t loadMoment(
     return __ldg(moments + midx(idx, moment));
 }
 
+__device__ __host__ [[nodiscard]] static __forceinline__ real_t topSpongeRamp(
+    const natural_t z) noexcept
+{
+    const real_t zn = static_cast<real_t>(z) * SPONGE_INV_NZ_M1;
+    real_t s = (zn - SPONGE_Z_START) * SPONGE_INV_WIDTH;
+
+    if (s < static_cast<real_t>(0))
+    {
+        s = static_cast<real_t>(0);
+    }
+    else if (s > static_cast<real_t>(1))
+    {
+        s = static_cast<real_t>(1);
+    }
+
+    return s * s * (static_cast<real_t>(3) - static_cast<real_t>(2) * s);
+}
+
 template <typename T, T v>
 struct IntegralConstant
 {

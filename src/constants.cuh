@@ -34,26 +34,26 @@ using real_t = float;
 
 // =================================================================================================== //
 
-constexpr natural_t NX = 220;
-constexpr natural_t NY = 220;
-constexpr natural_t NZ = 440;
+constexpr natural_t NX = 128;
+constexpr natural_t NY = 128;
+constexpr natural_t NZ = 256;
 
-constexpr real_t REYNOLDS = static_cast<real_t>(3000);
-constexpr real_t U_CHAR = static_cast<real_t>(0.05);
-constexpr real_t L_CHAR = static_cast<real_t>(24);
+constexpr real_t REYNOLDS = static_cast<real_t>(5000);
+constexpr real_t U_CHAR = static_cast<real_t>(0.01);
+constexpr real_t L_CHAR = static_cast<real_t>(20);
 
 constexpr natural_t NSTEPS = 100000;
 constexpr natural_t STAMP = 1000;
 
 constexpr real_t BULK_VISCOSITY_FACTOR = static_cast<real_t>(50);
 
-constexpr real_t PRANDTL = static_cast<real_t>(0.5);
+constexpr real_t PRANDTL = static_cast<real_t>(0.71);
 
 constexpr real_t T_COLD = static_cast<real_t>(0);
 constexpr real_t T_HOT = static_cast<real_t>(1);
 constexpr real_t T_REF = static_cast<real_t>(0.5);
 
-constexpr real_t BETA_THERMAL = static_cast<real_t>(0.1);
+constexpr real_t BETA_THERMAL = static_cast<real_t>(1);
 constexpr real_t THERMAL_SOURCE_VALUE = static_cast<real_t>(0);
 
 constexpr real_t THERMAL_GRAVITY_X = static_cast<real_t>(0);
@@ -116,6 +116,19 @@ constexpr real_t THERMAL_DIFFUSIVITY = VISCOSITY / PRANDTL;
 constexpr real_t TAU_THERMAL = static_cast<real_t>(0.5) + THERMAL_DIFFUSIVITY * static_cast<real_t>(3.0);
 constexpr real_t OMEGA_THERMAL = static_cast<real_t>(static_cast<double>(1) / static_cast<double>(TAU_THERMAL));
 constexpr real_t T_OMEGA_THERMAL = static_cast<real_t>(1.0) - OMEGA_THERMAL;
+
+// =================================================================================================== //
+
+constexpr real_t SPONGE_GAIN = static_cast<real_t>(100);
+constexpr natural_t SPONGE_CELLS = (NZ / 12u) > 0u ? (NZ / 12u) : 1u;
+constexpr real_t SPONGE_INV_NZ_M1 = static_cast<real_t>(static_cast<double>(1) / static_cast<double>(NZ - 1u));
+constexpr real_t SPONGE_WIDTH = static_cast<real_t>(static_cast<double>(SPONGE_CELLS) / static_cast<double>(NZ - 1u));
+constexpr real_t SPONGE_Z_START = static_cast<real_t>(static_cast<double>(NZ - 1u - SPONGE_CELLS) / static_cast<double>(NZ - 1u));
+constexpr real_t SPONGE_INV_WIDTH = static_cast<real_t>(static_cast<double>(1) / static_cast<double>(SPONGE_WIDTH));
+
+constexpr real_t TAU_SHEAR_SPONGE_MAX = static_cast<real_t>(0.5) + (TAU_SHEAR - static_cast<real_t>(0.5)) * (static_cast<real_t>(1) + SPONGE_GAIN);
+constexpr real_t TAU_BULK_SPONGE_MAX = static_cast<real_t>(0.5) + (TAU_BULK - static_cast<real_t>(0.5)) * (static_cast<real_t>(1) + SPONGE_GAIN);
+constexpr real_t TAU_THERMAL_SPONGE_MAX = static_cast<real_t>(0.5) + (TAU_THERMAL - static_cast<real_t>(0.5)) * (static_cast<real_t>(1) + SPONGE_GAIN);
 
 // =================================================================================================== //
 

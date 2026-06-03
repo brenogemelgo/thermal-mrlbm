@@ -34,9 +34,20 @@ static void printCaseSummary()
 #endif
 }
 
+static bool isValidRunId(
+    const std::string &runId)
+{
+    return !runId.empty() &&
+           runId != "." &&
+           runId != ".." &&
+           runId.find('/') == std::string::npos &&
+           runId.find('\\') == std::string::npos;
+}
+
 int main(int argc, char **argv)
 {
     bool continueFromCheckpoint = false;
+    std::string runId("000");
 
     for (int arg = 1; arg < argc; ++arg)
     {
@@ -46,6 +57,23 @@ int main(int argc, char **argv)
         {
             continueFromCheckpoint = true;
         }
+        else if (argument == "--runId")
+        {
+            if (arg + 1 >= argc)
+            {
+                std::cerr << "Missing value for --runId" << std::endl;
+                return EXIT_FAILURE;
+            }
+            runId = argv[++arg];
+        }
+        else if (argument.rfind("--runId=", 0) == 0)
+        {
+            runId = argument.substr(std::strlen("--runId="));
+        }
+        else if (!argument.empty() && argument[0] != '-' && runId == "000")
+        {
+            runId = argument;
+        }
         else
         {
             std::cerr << "Unknown argument: " << argument << std::endl;
@@ -53,6 +81,13 @@ int main(int argc, char **argv)
         }
     }
 
+    if (!isValidRunId(runId))
+    {
+        std::cerr << "Invalid run id: " << runId << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    setSimulationRunId(runId);
     initializeOutputLayout();
 
     real_t *moments = nullptr;

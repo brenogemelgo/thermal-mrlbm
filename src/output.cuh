@@ -92,9 +92,21 @@ static inline std::string outputCaseFolderName()
     return name;
 }
 
+static inline std::string &simulationRunId()
+{
+    static std::string runId("000");
+    return runId;
+}
+
+static inline void setSimulationRunId(
+    const std::string &runId)
+{
+    simulationRunId() = runId;
+}
+
 static inline std::filesystem::path getSimulationOutputDirectory()
 {
-    return std::filesystem::path("output") / outputCaseFolderName() / "000";
+    return std::filesystem::path("output") / outputCaseFolderName() / simulationRunId();
 }
 
 static inline std::filesystem::path getBinaryOutputDirectory()

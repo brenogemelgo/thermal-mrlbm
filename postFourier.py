@@ -1,9 +1,9 @@
 caseName = "fourier"
-runId = "000"
+runId = "128"
 selectedStep = None
 outputRoot = "output"
 showPlots = False
-figureDpi = 200
+figureDpi = 600
 
 import numpy as np
 import matplotlib
@@ -24,6 +24,8 @@ from postCommon import (
     getInt,
     getFloat,
     writeReport,
+    writeDatFile,
+    writeGridDatFile,
 )
 
 
@@ -59,7 +61,12 @@ def analyticalTemperature(metadata, stepValue, xGrid, yGrid, zGrid):
     kx, ky, kz, k2 = getWaveNumbers(metadata)
 
     timeValue = float(stepValue)
-    phase = kx * xGrid + ky * yGrid + kz * zGrid - (kx * ux0 + ky * uy0 + kz * uz0) * timeValue
+    phase = (
+        kx * xGrid
+        + ky * yGrid
+        + kz * zGrid
+        - (kx * ux0 + ky * uy0 + kz * uz0) * timeValue
+    )
     amplitude = ampT * np.exp(-alpha * k2 * timeValue)
     return t0 + amplitude * np.sin(phase), phase, amplitude
 
@@ -74,7 +81,16 @@ def estimateAmplitude(temperatureValues, phaseValues, t0):
     return np.sqrt(aSin * aSin + aCos * aCos)
 
 
-def savePlots(postDir, metadata, stepValue, temperatureNum, temperatureAna, errorValues, phaseValues, amplitudeAna):
+def savePlots(
+    postDir,
+    metadata,
+    stepValue,
+    temperatureNum,
+    temperatureAna,
+    errorValues,
+    phaseValues,
+    amplitudeAna,
+):
     nx = getInt(metadata, "NX")
     ny = getInt(metadata, "NY")
     nz = getInt(metadata, "NZ")
@@ -82,6 +98,17 @@ def savePlots(postDir, metadata, stepValue, temperatureNum, temperatureAna, erro
     zMid = nz // 2
 
     xValues = np.arange(nx)
+    writeDatFile(
+        postDir / f"fourierCenterlineStep{stepValue}.dat",
+        ["x", "temperatureNumerical", "temperatureAnalytical", "temperatureError"],
+        [
+            xValues,
+            temperatureNum[zMid, yMid, :],
+            temperatureAna[zMid, yMid, :],
+            errorValues[zMid, yMid, :],
+        ],
+    )
+
     plt.figure(figsize=(8, 4))
     plt.plot(xValues, temperatureNum[zMid, yMid, :], label="numerical")
     plt.plot(xValues, temperatureAna[zMid, yMid, :], "--", label="analytical")
@@ -94,6 +121,13 @@ def savePlots(postDir, metadata, stepValue, temperatureNum, temperatureAna, erro
     if showPlots:
         plt.show()
     plt.close()
+
+    xGrid2d, yGrid2d = np.meshgrid(np.arange(nx), np.arange(ny), indexing="xy")
+    writeGridDatFile(
+        postDir / f"fourierErrorMidplaneStep{stepValue}.dat",
+        ["x", "y", "temperatureError"],
+        [xGrid2d, yGrid2d, errorValues[zMid, :, :]],
+    )
 
     plt.figure(figsize=(6, 5))
     plt.imshow(errorValues[zMid, :, :], origin="lower", aspect="auto")
@@ -124,9 +158,28 @@ def saveAmplitudeDecay(postDir, runDir, metadata, stepValues, xGrid, yGrid, zGri
     amplitudeAnaValues = []
     for stepValue in stepValues:
         temperatureValues = readPackedField(runDir, metadata, "temperature", stepValue)
-        phaseValues = kx * xGrid + ky * yGrid + kz * zGrid - (kx * ux0 + ky * uy0 + kz * uz0) * float(stepValue)
+        phaseValues = (
+            kx * xGrid
+            + ky * yGrid
+            + kz * zGrid
+            - (kx * ux0 + ky * uy0 + kz * uz0) * float(stepValue)
+        )
         amplitudeNumValues.append(estimateAmplitude(temperatureValues, phaseValues, t0))
         amplitudeAnaValues.append(ampT * np.exp(-alpha * k2 * float(stepValue)))
+
+    amplitudeNumArray = np.asarray(amplitudeNumValues)
+    amplitudeAnaArray = np.asarray(amplitudeAnaValues)
+    writeDatFile(
+        postDir / "fourierAmplitudeDecay.dat",
+        ["step", "amplitudeNumerical", "amplitudeAnalytical", "relativeAmplitudeError"],
+        [
+            np.asarray(stepValues),
+            amplitudeNumArray,
+            amplitudeAnaArray,
+            np.abs(amplitudeNumArray - amplitudeAnaArray)
+            / np.maximum(np.abs(amplitudeAnaArray), 1.0e-30),
+        ],
+    )
 
     plt.figure(figsize=(7, 4))
     plt.plot(stepValues, amplitudeNumValues, "o-", label="numerical")
@@ -147,17 +200,27 @@ def main():
     metadata = readMetadata(runDir)
     postDir = getPostDir(runDir)
 
-    temperatureNum, stepValue = readScalarField(runDir, metadata, "temperature", selectedStep)
+    temperatureNum, stepValue = readScalarField(
+        runDir, metadata, "temperature", selectedStep
+    )
     xGrid, yGrid, zGrid = makeCoordinateGrids(metadata)
-    temperatureAna, phaseValues, amplitudeAna = analyticalTemperature(metadata, stepValue, xGrid, yGrid, zGrid)
+    temperatureAna, phaseValues, amplitudeAna = analyticalTemperature(
+        metadata, stepValue, xGrid, yGrid, zGrid
+    )
 
     errorValues = temperatureNum - temperatureAna
-    relativeL2Error = np.linalg.norm(errorValues.ravel()) / max(np.linalg.norm((temperatureAna - getFloat(metadata, "T0")).ravel()), 1.0e-30)
+    relativeL2Error = np.linalg.norm(errorValues.ravel()) / max(
+        np.linalg.norm((temperatureAna - getFloat(metadata, "T0")).ravel()), 1.0e-30
+    )
     absoluteLinfError = np.max(np.abs(errorValues))
     meanError = np.mean(errorValues)
     rmsError = np.sqrt(np.mean(errorValues * errorValues))
-    amplitudeNum = estimateAmplitude(temperatureNum, phaseValues, getFloat(metadata, "T0"))
-    relativeAmplitudeError = abs(amplitudeNum - amplitudeAna) / max(abs(amplitudeAna), 1.0e-30)
+    amplitudeNum = estimateAmplitude(
+        temperatureNum, phaseValues, getFloat(metadata, "T0")
+    )
+    relativeAmplitudeError = abs(amplitudeNum - amplitudeAna) / max(
+        abs(amplitudeAna), 1.0e-30
+    )
 
     reportLines = [
         f"selectedStep = {stepValue}",
@@ -172,8 +235,19 @@ def main():
     ]
     writeReport(postDir / "fourierReport.txt", reportLines)
 
-    savePlots(postDir, metadata, stepValue, temperatureNum, temperatureAna, errorValues, phaseValues, amplitudeAna)
-    saveAmplitudeDecay(postDir, runDir, metadata, listAvailableSteps(runDir), xGrid, yGrid, zGrid)
+    savePlots(
+        postDir,
+        metadata,
+        stepValue,
+        temperatureNum,
+        temperatureAna,
+        errorValues,
+        phaseValues,
+        amplitudeAna,
+    )
+    saveAmplitudeDecay(
+        postDir, runDir, metadata, listAvailableSteps(runDir), xGrid, yGrid, zGrid
+    )
 
 
 main()

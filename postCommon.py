@@ -322,3 +322,27 @@ def writeReport(reportPath, reportLines):
     with reportPath.open("w", encoding="utf-8") as outputFile:
         for lineText in reportLines:
             outputFile.write(f"{lineText}\n")
+
+
+def formatDatValue(value):
+    return f"{float(value):.17g}"
+
+
+def writeDatFile(datPath, columnNames, columnValues):
+    preparedColumns = [np.asarray(columnValue).reshape(-1) for columnValue in columnValues]
+    rowCount = max((columnValue.size for columnValue in preparedColumns), default=0)
+
+    with datPath.open("w", encoding="utf-8") as outputFile:
+        outputFile.write("# " + " ".join(columnNames) + "\n")
+        for rowIndex in range(rowCount):
+            rowValues = []
+            for columnValue in preparedColumns:
+                if rowIndex < columnValue.size:
+                    rowValues.append(formatDatValue(columnValue[rowIndex]))
+                else:
+                    rowValues.append("nan")
+            outputFile.write(" ".join(rowValues) + "\n")
+
+
+def writeGridDatFile(datPath, columnNames, columnValues):
+    writeDatFile(datPath, columnNames, [np.asarray(columnValue).reshape(-1) for columnValue in columnValues])

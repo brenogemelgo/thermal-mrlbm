@@ -22,6 +22,8 @@ from postCommon import (
     getInt,
     getFloat,
     writeReport,
+    writeDatFile,
+    writeGridDatFile,
 )
 
 
@@ -30,6 +32,19 @@ def saveMidplanePlots(postDir, metadata, stepValue, thetaValues, uxValues, uyVal
     ny = getInt(metadata, "NY")
     nz = getInt(metadata, "NZ")
     zMid = nz // 2
+    xGrid2d, yGrid2d = np.meshgrid(np.arange(nx), np.arange(ny), indexing="xy")
+
+    writeGridDatFile(
+        postDir / f"cavityTemperatureMidplaneStep{stepValue}.dat",
+        ["x", "y", "theta", "ux", "uy"],
+        [
+            xGrid2d,
+            yGrid2d,
+            thetaValues[zMid, :, :],
+            uxValues[zMid, :, :],
+            uyValues[zMid, :, :],
+        ],
+    )
 
     plt.figure(figsize=(6, 5))
     plt.imshow(thetaValues[zMid, :, :], origin="lower", extent=(0, nx - 1, 0, ny - 1), aspect="auto")
@@ -56,6 +71,12 @@ def saveMidplanePlots(postDir, metadata, stepValue, thetaValues, uxValues, uyVal
         plt.show()
     plt.close()
 
+    writeGridDatFile(
+        postDir / f"cavityVelocityMidplaneStep{stepValue}.dat",
+        ["x", "y", "velocityMagnitude"],
+        [xGrid2d, yGrid2d, velocityMagnitude[zMid, :, :]],
+    )
+
     plt.figure(figsize=(6, 5))
     plt.imshow(velocityMagnitude[zMid, :, :], origin="lower", extent=(0, nx - 1, 0, ny - 1), aspect="auto")
     plt.colorbar(label="|u|")
@@ -79,6 +100,17 @@ def saveCenterlinePlots(postDir, metadata, stepValue, thetaValues, uxValues, uyV
 
     xValues = np.arange(nx)
     yValues = np.arange(ny)
+    writeDatFile(
+        postDir / f"cavityCenterlineProfilesStep{stepValue}.dat",
+        ["x", "uyAtYMid", "y", "uxAtXMid", "thetaAtYMid"],
+        [
+            xValues,
+            uyValues[zMid, yMid, :],
+            yValues,
+            uxValues[zMid, :, xMid],
+            thetaValues[zMid, yMid, :],
+        ],
+    )
 
     plt.figure(figsize=(8, 6))
     plt.subplot(3, 1, 1)

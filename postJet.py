@@ -24,6 +24,8 @@ from postCommon import (
     getBool,
     getMetadataValue,
     writeReport,
+    writeDatFile,
+    writeGridDatFile,
 )
 
 
@@ -34,6 +36,13 @@ def saveJetPlots(postDir, metadata, stepValue, thetaValues, uzValues, thetaMeanV
     centerX = nx // 2
     centerY = ny // 2
     zValues = np.arange(nz)
+    xGrid2d, zGrid2d = np.meshgrid(np.arange(nx), np.arange(nz), indexing="xy")
+
+    writeGridDatFile(
+        postDir / f"jetTemperatureXzStep{stepValue}.dat",
+        ["x", "z", "theta"],
+        [xGrid2d, zGrid2d, thetaValues[:, centerY, :]],
+    )
 
     plt.figure(figsize=(7, 5))
     plt.imshow(thetaValues[:, centerY, :], origin="lower", extent=(0, nx - 1, 0, nz - 1), aspect="auto")
@@ -47,6 +56,12 @@ def saveJetPlots(postDir, metadata, stepValue, thetaValues, uzValues, thetaMeanV
         plt.show()
     plt.close()
 
+    writeGridDatFile(
+        postDir / f"jetUzXzStep{stepValue}.dat",
+        ["x", "z", "uz"],
+        [xGrid2d, zGrid2d, uzValues[:, centerY, :]],
+    )
+
     plt.figure(figsize=(7, 5))
     plt.imshow(uzValues[:, centerY, :], origin="lower", extent=(0, nx - 1, 0, nz - 1), aspect="auto")
     plt.colorbar(label="uz")
@@ -58,6 +73,28 @@ def saveJetPlots(postDir, metadata, stepValue, thetaValues, uzValues, thetaMeanV
     if showPlots:
         plt.show()
     plt.close()
+
+    thetaMeanCenter = (
+        thetaMeanValues[:, centerY, centerX]
+        if thetaMeanValues is not None
+        else np.full_like(zValues, np.nan, dtype=np.float64)
+    )
+    uzMeanCenter = (
+        uzMeanValues[:, centerY, centerX]
+        if uzMeanValues is not None
+        else np.full_like(zValues, np.nan, dtype=np.float64)
+    )
+    writeDatFile(
+        postDir / f"jetCenterlineProfilesStep{stepValue}.dat",
+        ["z", "theta", "uz", "thetaMean", "uzMean"],
+        [
+            zValues,
+            thetaValues[:, centerY, centerX],
+            uzValues[:, centerY, centerX],
+            thetaMeanCenter,
+            uzMeanCenter,
+        ],
+    )
 
     plt.figure(figsize=(7, 5))
     plt.plot(zValues, thetaValues[:, centerY, centerX], label="theta")

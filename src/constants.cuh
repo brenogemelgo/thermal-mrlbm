@@ -69,7 +69,7 @@ constexpr real_t L_CHAR = ActiveCase::L_CHAR;
 constexpr natural_t NSTEPS = ActiveCase::NSTEPS;
 constexpr natural_t STAMP = ActiveCase::STAMP;
 
-constexpr real_t BULK_VISCOSITY_FACTOR = static_cast<real_t>(50);
+constexpr real_t BULK_VISCOSITY_FACTOR = static_cast<real_t>(1);
 
 constexpr real_t PRANDTL = ActiveCase::PR;
 

@@ -41,6 +41,11 @@ __device__ static __forceinline__ void initialPrimitiveFields(
                                  ? static_cast<real_t>(x) / static_cast<real_t>(NX - 1u)
                                  : static_cast<real_t>(0);
         temperature = T_HOT + (T_COLD - T_HOT) * xNorm;
+#elif defined(CASE_SLOT)
+        const real_t xNorm = ActiveCase::L_SLOT > static_cast<real_t>(0)
+                                 ? static_cast<real_t>(x) / ActiveCase::L_SLOT
+                                 : static_cast<real_t>(0);
+        temperature = T_HOT - ActiveCase::DELTA_T * xNorm;
 #elif defined(CASE_JET)
         const bool inlet = isJetInlet(x, y, z);
         const real_t profile = inlet ? jetInletProfile(x, y) : static_cast<real_t>(0);

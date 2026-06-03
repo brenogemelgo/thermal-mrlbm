@@ -14,7 +14,7 @@ for arg in "$@"; do
         runId="${arg#RUNID=}"
     elif [[ "$arg" != --* ]]; then
         ARG_CASE_NAME="$(printf '%s' "$arg" | tr '[:lower:]' '[:upper:]')"
-        if [[ -z "$CASE_NAME" && ( "$ARG_CASE_NAME" == "FOURIER" || "$ARG_CASE_NAME" == "CAVITY" || "$ARG_CASE_NAME" == "JET" ) ]]; then
+        if [[ -z "$CASE_NAME" && ( "$ARG_CASE_NAME" == "FOURIER" || "$ARG_CASE_NAME" == "CAVITY" || "$ARG_CASE_NAME" == "SLOT" || "$ARG_CASE_NAME" == "JET" ) ]]; then
             CASE_NAME="$ARG_CASE_NAME"
         elif [[ -z "$runId" ]]; then
             runId="$arg"
@@ -39,11 +39,14 @@ case "$CASE_NAME" in
     CAVITY)
         CASE_DEFINE="-DCASE_CAVITY"
         ;;
+    SLOT)
+        CASE_DEFINE="-DCASE_SLOT"
+        ;;
     JET)
         CASE_DEFINE="-DCASE_JET"
         ;;
     *)
-        echo "Unknown NAME=$CASE_NAME. Use NAME=FOURIER, NAME=CAVITY, or NAME=JET." >&2
+        echo "Unknown NAME=$CASE_NAME. Use NAME=FOURIER, NAME=CAVITY, NAME=SLOT, or NAME=JET." >&2
         exit 1
         ;;
 esac

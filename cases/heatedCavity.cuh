@@ -10,15 +10,15 @@ struct HeatedCavityCase
     static constexpr natural_t NY = 64;
     static constexpr natural_t NZ = 16;
 
-    static constexpr natural_t NSTEPS = 20000;
-    static constexpr natural_t STAMP = 500;
+    static constexpr natural_t NSTEPS = 80000; // 30000, 50000, 80000
+    static constexpr natural_t STAMP = 1000;
 
     static constexpr real_t THOT = static_cast<real_t>(1);
     static constexpr real_t TCOLD = static_cast<real_t>(0);
     static constexpr real_t TREF = static_cast<real_t>(0.5) * (THOT + TCOLD);
 
     static constexpr real_t PR = static_cast<real_t>(0.71);
-    static constexpr real_t RA = static_cast<real_t>(1.0e4);
+    static constexpr real_t RA = static_cast<real_t>(1.0e5); // 1e3, 1e4, 1e5
 
     static constexpr real_t UFREEFALL_TARGET = static_cast<real_t>(0.05);
     static constexpr real_t L_CAVITY = static_cast<real_t>(NX - 1u);

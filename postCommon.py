@@ -5,6 +5,7 @@ Run the case scripts from the repository root:
 
     python postFourier.py
     python postCavity.py
+    python postSlot.py
     python postJet.py
 
 Array convention:

@@ -46,6 +46,12 @@ using ActiveCase = HeatedCavityCase;
 constexpr bool CASE_IS_FOURIER = false;
 constexpr bool CASE_IS_CAVITY = true;
 constexpr bool CASE_IS_JET = false;
+#elif defined(CASE_SLOT)
+#include "../cases/verticalBuoyantSlot.cuh"
+using ActiveCase = VerticalBuoyantSlotCase;
+constexpr bool CASE_IS_FOURIER = false;
+constexpr bool CASE_IS_CAVITY = false;
+constexpr bool CASE_IS_JET = false;
 #elif defined(CASE_JET)
 #include "../cases/thermalJet.cuh"
 using ActiveCase = ThermalJetCase;
@@ -53,7 +59,7 @@ constexpr bool CASE_IS_FOURIER = false;
 constexpr bool CASE_IS_CAVITY = false;
 constexpr bool CASE_IS_JET = true;
 #else
-#error "No case selected. Compile with -DCASE_FOURIER, -DCASE_CAVITY, or -DCASE_JET."
+#error "No case selected. Compile with -DCASE_FOURIER, -DCASE_CAVITY, -DCASE_SLOT, or -DCASE_JET."
 #endif
 
 // =================================================================================================== //

@@ -28,6 +28,10 @@ static void printCaseSummary()
 #if defined(CASE_CAVITY)
     std::cout << "RA: " << static_cast<double>(ActiveCase::RA) << std::endl;
     std::cout << "GBETA: " << static_cast<double>(ActiveCase::GBETA) << std::endl;
+#elif defined(CASE_SLOT)
+    std::cout << "RA: " << static_cast<double>(ActiveCase::RA) << std::endl;
+    std::cout << "GBETA: " << static_cast<double>(ActiveCase::GBETA) << std::endl;
+    std::cout << "target uy max: " << static_cast<double>(ActiveCase::targetUyMax) << std::endl;
 #elif defined(CASE_JET)
     std::cout << "RI: " << static_cast<double>(ActiveCase::RI) << std::endl;
     std::cout << "GBETA: " << static_cast<double>(ActiveCase::GBETA) << std::endl;

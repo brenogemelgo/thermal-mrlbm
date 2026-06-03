@@ -204,6 +204,17 @@ static inline void writeMetadata(
     out << "DELTA_T = " << static_cast<double>(ActiveCase::DELTA_T) << '\n';
     out << "L_CAVITY = " << static_cast<double>(ActiveCase::L_CAVITY) << '\n';
     out << "UFREEFALL_TARGET = " << static_cast<double>(ActiveCase::UFREEFALL_TARGET) << '\n';
+#elif defined(CASE_SLOT)
+    out << "timeAverageEnabled = false" << '\n';
+    out << "timeAverageCount = 0" << '\n';
+    out << '\n';
+    out << "DELTA_T = " << static_cast<double>(ActiveCase::DELTA_T) << '\n';
+    out << "L_SLOT = " << static_cast<double>(ActiveCase::L_SLOT) << '\n';
+    out << "targetUyMax = " << static_cast<double>(ActiveCase::targetUyMax) << '\n';
+    out << "slotProfileMaxFactor = " << static_cast<double>(ActiveCase::slotProfileMaxFactor) << '\n';
+    out << "slotVelocityScale = " << static_cast<double>(ActiveCase::slotVelocityScale) << '\n';
+    out << "RE = " << static_cast<double>(ActiveCase::RE) << '\n';
+    out << "RA = " << static_cast<double>(ActiveCase::RA) << '\n';
 #elif defined(CASE_JET)
     out << "timeAverageEnabled = " << ActiveCase::timeAverageEnabled << '\n';
     out << "timeAverageStart = " << ActiveCase::timeAverageStart << '\n';

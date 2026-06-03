@@ -4,12 +4,13 @@ struct FourierAdvectionDiffusionCase
 {
     static constexpr const char *NAME = "FOURIER";
 
-    static constexpr natural_t NX = 32;
-    static constexpr natural_t NY = 32;
-    static constexpr natural_t NZ = 32;
+    static constexpr natural_t MESH = 32; // 32, 64, 128
+    static constexpr natural_t NX = MESH;
+    static constexpr natural_t NY = MESH;
+    static constexpr natural_t NZ = MESH;
 
-    static constexpr natural_t NSTEPS = 5000;
-    static constexpr natural_t STAMP = 250;
+    static constexpr natural_t NSTEPS = 5000; // 5000, 10000, 20000
+    static constexpr natural_t STAMP = 250;   // 250, 500, 1000
 
     static constexpr real_t T0 = static_cast<real_t>(1);
     static constexpr real_t AMP_T = static_cast<real_t>(1.0e-2);

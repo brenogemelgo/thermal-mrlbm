@@ -46,23 +46,15 @@ __device__ static __forceinline__ void boundaryVelocityConst(
     ubz = nodeTypeValue == INLET ? U_CHAR : static_cast<real_t>(0);
 }
 
-// ===================================================================================================================== //
-
-__device__ static __forceinline__ void copyOutflowMomentsFromLastPlane(
-    const real_t *__restrict__ moments,
-    real_t *__restrict__ dbuffer,
-    const natural_t x,
-    const natural_t y,
-    const natural_t z,
-    const natural_t idx) noexcept
+__device__ static __forceinline__ void boundaryVelocityRuntime(
+    const unsigned int nodeType,
+    real_t &ubx,
+    real_t &uby,
+    real_t &ubz) noexcept
 {
-    const natural_t src = global3(x, y, z - 1u);
-
-    constexpr_for<0, NUM_MOMENTS>(
-        [&](const auto moment) noexcept
-        {
-            dbuffer[midx(idx, moment)] = loadMoment(moments, src, moment);
-        });
+    ubx = static_cast<real_t>(0);
+    uby = static_cast<real_t>(0);
+    ubz = (nodeType & INLET_FLAG) == INLET_FLAG ? U_CHAR : static_cast<real_t>(0);
 }
 
 // ===================================================================================================================== //
@@ -82,6 +74,103 @@ __device__ static __forceinline__ void applyThermalBoundaryTyped(
     (void)uz;
 
     temp = T_COLD;
+    tux = static_cast<real_t>(0);
+    tuy = static_cast<real_t>(0);
+    tuz = static_cast<real_t>(0);
+}
+
+// ===================================================================================================================== //
+
+__device__ static __forceinline__ real_t loadClampedTemperatureNeighbor(
+    const real_t *__restrict__ moments,
+    const natural_t x,
+    const natural_t y,
+    const natural_t z,
+    const int dx,
+    const int dy,
+    const int dz) noexcept
+{
+    int xx = static_cast<int>(x) + dx;
+    int yy = static_cast<int>(y) + dy;
+    int zz = static_cast<int>(z) + dz;
+
+    if (xx < 0)
+    {
+        xx = 0;
+    }
+    else if (xx >= static_cast<int>(NX))
+    {
+        xx = static_cast<int>(NX - 1u);
+    }
+
+    if (yy < 0)
+    {
+        yy = 0;
+    }
+    else if (yy >= static_cast<int>(NY))
+    {
+        yy = static_cast<int>(NY - 1u);
+    }
+
+    if (zz < 0)
+    {
+        zz = 0;
+    }
+    else if (zz >= static_cast<int>(NZ))
+    {
+        zz = static_cast<int>(NZ - 1u);
+    }
+
+    return loadMoment(moments, global3(static_cast<natural_t>(xx), static_cast<natural_t>(yy), static_cast<natural_t>(zz)), TEMP);
+}
+
+__device__ static __forceinline__ void applyWallThermalBoundary(
+    const real_t *__restrict__ moments,
+    const natural_t x,
+    const natural_t y,
+    const natural_t z,
+    const unsigned int nodeType,
+    real_t &temp,
+    real_t &tux,
+    real_t &tuy,
+    real_t &tuz) noexcept
+{
+    if constexpr (CASE_IS_CAVITY)
+    {
+        if ((nodeType & XMIN_FACE) == XMIN_FACE)
+        {
+            temp = T_HOT;
+        }
+        else if ((nodeType & XMAX_FACE) == XMAX_FACE)
+        {
+            temp = T_COLD;
+        }
+        else if ((nodeType & YMIN_FACE) == YMIN_FACE)
+        {
+            temp = loadClampedTemperatureNeighbor(moments, x, y, z, 0, 1, 0);
+        }
+        else if ((nodeType & YMAX_FACE) == YMAX_FACE)
+        {
+            temp = loadClampedTemperatureNeighbor(moments, x, y, z, 0, -1, 0);
+        }
+        else if ((nodeType & ZMIN_FACE) == ZMIN_FACE)
+        {
+            temp = loadClampedTemperatureNeighbor(moments, x, y, z, 0, 0, 1);
+        }
+        else if ((nodeType & ZMAX_FACE) == ZMAX_FACE)
+        {
+            temp = loadClampedTemperatureNeighbor(moments, x, y, z, 0, 0, -1);
+        }
+        else
+        {
+            temp = T_REF;
+        }
+    }
+    else
+    {
+        temp = T_COLD;
+    }
+
     tux = static_cast<real_t>(0);
     tuy = static_cast<real_t>(0);
     tuz = static_cast<real_t>(0);
@@ -171,6 +260,230 @@ __device__ static __forceinline__ void applyIRBCBoundaryTyped(
     myz = solved[6] * invRho;
 }
 
+__device__ static __forceinline__ void applyIRBCBoundaryRuntime(
+    const real_t *__restrict__ moments,
+    const natural_t x,
+    const natural_t y,
+    const natural_t z,
+    const unsigned int nodeType,
+    real_t &rho,
+    real_t &ux,
+    real_t &uy,
+    real_t &uz,
+    real_t &mxx,
+    real_t &myy,
+    real_t &mzz,
+    real_t &mxy,
+    real_t &mxz,
+    real_t &myz) noexcept
+{
+    const natural_t tableOffset = static_cast<natural_t>(nodeType) * IRBC_TABLE_STRIDE;
+
+    real_t ubx;
+    real_t uby;
+    real_t ubz;
+    boundaryVelocityRuntime(nodeType, ubx, uby, ubz);
+
+    real_t rhs[IRBC_UNKNOWNS] = {
+        static_cast<real_t>(0),
+        static_cast<real_t>(0),
+        static_cast<real_t>(0),
+        static_cast<real_t>(0),
+        static_cast<real_t>(0),
+        static_cast<real_t>(0),
+        static_cast<real_t>(0)};
+
+    constexpr_for<0, VelocitySet::Q()>(
+        [&](const auto Q) noexcept
+        {
+            if (!isMissingDirectionRuntime<Q>(nodeType))
+            {
+                const real_t f = reconstructPopulation<Q>(moments, x, y, z);
+
+                rhs[0] += f;
+                rhs[1] += f * (VelocitySet::hxx<Q>() - VelocitySet::hzz<Q>());
+                rhs[2] += f * (VelocitySet::hyy<Q>() - VelocitySet::hzz<Q>());
+                rhs[3] += f * VelocitySet::hxy<Q>();
+                rhs[4] += f * VelocitySet::hxz<Q>();
+                rhs[5] += f * VelocitySet::hyz<Q>();
+            }
+        });
+
+    rhs[6] = static_cast<real_t>(0);
+
+    real_t solved[IRBC_UNKNOWNS] = {};
+
+#pragma unroll
+    for (natural_t row = 0; row < IRBC_UNKNOWNS; ++row)
+    {
+        real_t sum = static_cast<real_t>(0);
+#pragma unroll
+        for (natural_t col = 0; col < IRBC_UNKNOWNS; ++col)
+        {
+            sum += IRBC_INVERSE[tableOffset + row * IRBC_UNKNOWNS + col] * rhs[col];
+        }
+        solved[row] = sum;
+    }
+
+    rho = solved[0];
+
+    const real_t invRho = static_cast<real_t>(1) / rho;
+
+    ux = ubx;
+    uy = uby;
+    uz = ubz;
+
+    mxx = solved[1] * invRho;
+    myy = solved[2] * invRho;
+    mzz = solved[3] * invRho;
+    mxy = solved[4] * invRho;
+    mxz = solved[5] * invRho;
+    myz = solved[6] * invRho;
+}
+
+template <natural_t Q>
+__device__ [[nodiscard]] static __forceinline__ real_t outflowLowerPopulation(
+    const real_t rho,
+    const real_t ux,
+    const real_t uy,
+    const real_t uz) noexcept
+{
+    constexpr int cx = VelocitySet::cx<Q>();
+    constexpr int cy = VelocitySet::cy<Q>();
+    constexpr int cz = VelocitySet::cz<Q>();
+
+    const real_t cu = ux * static_cast<real_t>(cx) +
+                      uy * static_cast<real_t>(cy) +
+                      uz * static_cast<real_t>(cz);
+
+    const real_t meqH =
+        static_cast<real_t>(0.5) * VelocitySet::as4() *
+            (ux * ux * VelocitySet::hxx<Q>() +
+             uy * uy * VelocitySet::hyy<Q>() +
+             uz * uz * VelocitySet::hzz<Q>()) +
+        VelocitySet::as4() *
+            (ux * uy * VelocitySet::hxy<Q>() +
+             ux * uz * VelocitySet::hxz<Q>() +
+             uy * uz * VelocitySet::hyz<Q>());
+
+    return VelocitySet::w<Q>() * rho *
+           (static_cast<real_t>(1) + VelocitySet::as2() * cu + OMEGA_SHEAR * meqH);
+}
+
+template <natural_t Q>
+__device__ static __forceinline__ void accumulateOutflowIRBCRhs(
+    const real_t *__restrict__ moments,
+    const natural_t x,
+    const natural_t y,
+    const natural_t z,
+    const real_t rho,
+    const real_t ux,
+    const real_t uy,
+    const real_t uz,
+    real_t (&knownMoments)[6]) noexcept
+{
+    real_t f;
+
+    if constexpr (isMissingDirectionConst<OUTFLOW, Q>())
+    {
+        f = outflowLowerPopulation<Q>(rho, ux, uy, uz);
+    }
+    else
+    {
+        f = reconstructPopulation<Q>(moments, x, y, z);
+    }
+
+    knownMoments[0] += f * VelocitySet::hxx<Q>();
+    knownMoments[1] += f * VelocitySet::hyy<Q>();
+    knownMoments[2] += f * VelocitySet::hzz<Q>();
+    knownMoments[3] += f * VelocitySet::hxy<Q>();
+    knownMoments[4] += f * VelocitySet::hxz<Q>();
+    knownMoments[5] += f * VelocitySet::hyz<Q>();
+}
+
+__device__ static __forceinline__ void applyOutflowNeumannIRBC(
+    const real_t *__restrict__ moments,
+    const natural_t x,
+    const natural_t y,
+    const natural_t z,
+    real_t &rho,
+    real_t &ux,
+    real_t &uy,
+    real_t &uz,
+    real_t &mxx,
+    real_t &myy,
+    real_t &mzz,
+    real_t &mxy,
+    real_t &mxz,
+    real_t &myz,
+    real_t &temp,
+    real_t &tux,
+    real_t &tuy,
+    real_t &tuz) noexcept
+{
+    (void)z;
+
+    const natural_t src = global3(x, y, NZ - 2u);
+
+    rho = loadMoment(moments, src, RHO);
+    ux = loadMoment(moments, src, UX) / VelocitySet::scaleI();
+    uy = loadMoment(moments, src, UY) / VelocitySet::scaleI();
+    uz = loadMoment(moments, src, UZ) / VelocitySet::scaleI();
+
+    temp = loadMoment(moments, src, TEMP);
+    tux = loadMoment(moments, src, TUX) / VelocitySet::scaleI();
+    tuy = loadMoment(moments, src, TUY) / VelocitySet::scaleI();
+    tuz = loadMoment(moments, src, TUZ) / VelocitySet::scaleI();
+
+    real_t knownMoments[6] = {
+        static_cast<real_t>(0),
+        static_cast<real_t>(0),
+        static_cast<real_t>(0),
+        static_cast<real_t>(0),
+        static_cast<real_t>(0),
+        static_cast<real_t>(0)};
+
+    constexpr_for<0, VelocitySet::Q()>(
+        [&](const auto Q) noexcept
+        {
+            accumulateOutflowIRBCRhs<Q>(
+                moments,
+                x, y, NZ - 1u,
+                rho, ux, uy, uz,
+                knownMoments);
+        });
+
+    real_t rhs[IRBC_OUTFLOW_UNKNOWNS] = {
+        knownMoments[0] - knownMoments[2],
+        knownMoments[1] - knownMoments[2],
+        knownMoments[3],
+        knownMoments[4],
+        knownMoments[5],
+        rho * (ux * ux + uy * uy + uz * uz)};
+
+    real_t solved[IRBC_OUTFLOW_UNKNOWNS] = {};
+
+#pragma unroll
+    for (natural_t row = 0; row < IRBC_OUTFLOW_UNKNOWNS; ++row)
+    {
+        real_t sum = static_cast<real_t>(0);
+#pragma unroll
+        for (natural_t col = 0; col < IRBC_OUTFLOW_UNKNOWNS; ++col)
+        {
+            sum += IRBC_OUTFLOW_INVERSE[row * IRBC_OUTFLOW_UNKNOWNS + col] * rhs[col];
+        }
+        solved[row] = sum;
+    }
+
+    const real_t invRho = static_cast<real_t>(1) / rho;
+    mxx = solved[0] * invRho;
+    myy = solved[1] * invRho;
+    mzz = solved[2] * invRho;
+    mxy = solved[3] * invRho;
+    mxz = solved[4] * invRho;
+    myz = solved[5] * invRho;
+}
+
 __device__ static __forceinline__ void dispatchIRBCBoundary(
     const real_t *__restrict__ moments,
     const natural_t x,
@@ -193,14 +506,20 @@ __device__ static __forceinline__ void dispatchIRBCBoundary(
     real_t &tuy,
     real_t &tuz) noexcept
 {
-    switch (nodeType)
+    if ((nodeType & OUTFLOW_FLAG) == OUTFLOW_FLAG)
     {
-    case WALL:
-        applyIRBCBoundaryTyped<WALL>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
-        applyThermalBoundaryTyped<WALL>(ux, uy, uz, temp, tux, tuy, tuz);
+        applyOutflowNeumannIRBC(
+            moments,
+            x, y, z,
+            rho, ux, uy, uz,
+            mxx, myy, mzz, mxy, mxz, myz,
+            temp, tux, tuy, tuz);
         return;
-    case INLET:
-        applyIRBCBoundaryTyped<INLET>(moments, x, y, z, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
+    }
+
+    if ((nodeType & INLET_FLAG) == INLET_FLAG)
+    {
+        applyIRBCBoundaryRuntime(moments, x, y, z, nodeType, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
         {
             const real_t profile = jetInletProfile(x, y);
             const real_t envelope = turbulentInflowEnvelope(profile);
@@ -231,7 +550,14 @@ __device__ static __forceinline__ void dispatchIRBCBoundary(
             tuz = temp * uz;
         }
         return;
-    default:
-        __builtin_unreachable();
     }
+
+    if ((nodeType & FACE_MASK) != 0u)
+    {
+        applyIRBCBoundaryRuntime(moments, x, y, z, nodeType, rho, ux, uy, uz, mxx, myy, mzz, mxy, mxz, myz);
+        applyWallThermalBoundary(moments, x, y, z, nodeType, temp, tux, tuy, tuz);
+        return;
+    }
+
+    __builtin_unreachable();
 }

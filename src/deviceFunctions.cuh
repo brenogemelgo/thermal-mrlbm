@@ -29,10 +29,22 @@ __device__ [[nodiscard]] static __forceinline__ natural_t jetPullNeighborIndex(
 {
     int xs = static_cast<int>(x) - cx;
     int ys = static_cast<int>(y) - cy;
-    const int zs = static_cast<int>(z) - cz;
+    int zs = static_cast<int>(z) - cz;
 
-    xs = (xs + static_cast<int>(NX)) % static_cast<int>(NX);
-    ys = (ys + static_cast<int>(NY)) % static_cast<int>(NY);
+    if constexpr (PERIODIC_X)
+    {
+        xs = (xs + static_cast<int>(NX)) % static_cast<int>(NX);
+    }
+
+    if constexpr (PERIODIC_Y)
+    {
+        ys = (ys + static_cast<int>(NY)) % static_cast<int>(NY);
+    }
+
+    if constexpr (PERIODIC_Z)
+    {
+        zs = (zs + static_cast<int>(NZ)) % static_cast<int>(NZ);
+    }
 
     return global3(
         static_cast<natural_t>(xs),
@@ -63,6 +75,11 @@ __device__ [[nodiscard]] static __forceinline__ real_t loadMoment(
 __device__ __host__ [[nodiscard]] static __forceinline__ real_t topSpongeRamp(
     const natural_t z) noexcept
 {
+    if constexpr (!ENABLE_OUTFLOW)
+    {
+        return static_cast<real_t>(0);
+    }
+
     const real_t zn = static_cast<real_t>(z) * SPONGE_INV_NZ_M1;
     real_t s = (zn - SPONGE_Z_START) * SPONGE_INV_WIDTH;
 

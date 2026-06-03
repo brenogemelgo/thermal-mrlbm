@@ -3,12 +3,7 @@
 #include "kernel.cuh"
 #include "output.cuh"
 
-// #define STATISTICS
 // #define BENCHMARK
-
-#ifdef STATISTICS
-#include "statistics.cuh"
-#endif
 
 #define CUDA_CHECK(call)                                                         \
     do                                                                           \
@@ -21,29 +16,27 @@
         }                                                                        \
     } while (false)
 
-static bool startsWith(
-    const std::string &value,
-    const char *prefix)
+static void printCaseSummary()
 {
-    const std::size_t prefixLength = std::strlen(prefix);
-    return value.size() >= prefixLength && value.compare(0, prefixLength, prefix) == 0;
-}
+    std::cout << "selected case: " << ActiveCase::NAME << std::endl;
+    std::cout << "grid: " << NX << " x " << NY << " x " << NZ << std::endl;
+    std::cout << "NU: " << static_cast<double>(VISCOSITY) << std::endl;
+    std::cout << "ALPHA: " << static_cast<double>(THERMAL_DIFFUSIVITY) << std::endl;
+    std::cout << "RE: " << static_cast<double>(REYNOLDS) << std::endl;
+    std::cout << "PR: " << static_cast<double>(PRANDTL) << std::endl;
 
-static bool isValidCaseId(
-    const std::string &caseId)
-{
-    return !caseId.empty() &&
-           caseId != "." &&
-           caseId != ".." &&
-           caseId.find('/') == std::string::npos &&
-           caseId.find('\\') == std::string::npos;
+#if defined(CASE_CAVITY)
+    std::cout << "RA: " << static_cast<double>(ActiveCase::RA) << std::endl;
+    std::cout << "GBETA: " << static_cast<double>(ActiveCase::GBETA) << std::endl;
+#elif defined(CASE_JET)
+    std::cout << "RI: " << static_cast<double>(ActiveCase::RI) << std::endl;
+    std::cout << "GBETA: " << static_cast<double>(ActiveCase::GBETA) << std::endl;
+#endif
 }
 
 int main(int argc, char **argv)
 {
     bool continueFromCheckpoint = false;
-    bool inletTurbulenceDiagnostics = false;
-    std::string caseId = "default";
 
     for (int arg = 1; arg < argc; ++arg)
     {
@@ -53,27 +46,6 @@ int main(int argc, char **argv)
         {
             continueFromCheckpoint = true;
         }
-        else if (argument == "--inlet-turbulence-diagnostics")
-        {
-            inletTurbulenceDiagnostics = true;
-        }
-        else if (argument == "--case-id")
-        {
-            if (arg + 1 >= argc)
-            {
-                std::cerr << "Missing value for --case-id" << std::endl;
-                return EXIT_FAILURE;
-            }
-            caseId = argv[++arg];
-        }
-        else if (startsWith(argument, "--case-id="))
-        {
-            caseId = argument.substr(std::strlen("--case-id="));
-        }
-        else if (!argument.empty() && argument[0] != '-' && caseId == "default")
-        {
-            caseId = argument;
-        }
         else
         {
             std::cerr << "Unknown argument: " << argument << std::endl;
@@ -81,19 +53,7 @@ int main(int argc, char **argv)
         }
     }
 
-    if (!isValidCaseId(caseId))
-    {
-        std::cerr << "Invalid case id: " << caseId << std::endl;
-        return EXIT_FAILURE;
-    }
-
-    if (inletTurbulenceDiagnostics)
-    {
-        printSyntheticTurbulentInflowDiagnostics();
-        return EXIT_SUCCESS;
-    }
-
-    setSimulationOutputDirectory(std::filesystem::path("output") / caseId);
+    initializeOutputLayout();
 
     real_t *moments = nullptr;
     real_t *dbuffer = nullptr;
@@ -118,7 +78,7 @@ int main(int argc, char **argv)
     }
     else
     {
-        jetInit<<<grid, block>>>(moments, dbuffer);
+        initializeCase<<<grid, block>>>(moments, dbuffer);
         CUDA_CHECK(cudaGetLastError());
         CUDA_CHECK(cudaDeviceSynchronize());
     }
@@ -132,18 +92,13 @@ int main(int argc, char **argv)
     {
         std::cout << "simulation start" << std::endl;
     }
-    std::cout << "case id: " << caseId << std::endl;
     std::cout << "output: " << getSimulationOutputDirectory() << std::endl;
+    std::cout << "binaries: " << getBinaryOutputDirectory() << std::endl;
+    std::cout << "vtis: " << getVtiOutputDirectory() << std::endl;
+    printCaseSummary();
 
 #ifndef BENCHMARK
     writeOutput(moments, startStep);
-#endif
-
-#ifdef STATISTICS
-    JetStatisticsAccumulator statisticsAccumulator;
-    natural_t statisticsSampleCount = 0;
-    accumulateStatisticsSample(statisticsAccumulator, moments);
-    ++statisticsSampleCount;
 #endif
 
     const auto start = std::chrono::high_resolution_clock::now();
@@ -156,11 +111,6 @@ int main(int argc, char **argv)
     {
         streamCollide<<<grid, block>>>(moments, dbuffer, t);
         std::swap(moments, dbuffer);
-
-#ifdef STATISTICS
-        accumulateStatisticsSample(statisticsAccumulator, moments);
-        ++statisticsSampleCount;
-#endif
 
 #ifndef BENCHMARK
         if ((t + 1) % STAMP == 0)
@@ -195,10 +145,6 @@ int main(int argc, char **argv)
     std::cout << std::endl;
     std::cout << "elapsed: " << elapsed.count() << " s" << std::endl;
     std::cout << "MLUPS: " << mlups << std::endl;
-
-#ifdef STATISTICS
-    writeStatisticsOutput(statisticsAccumulator, statisticsSampleCount, startStep, NSTEPS);
-#endif
 
     CUDA_CHECK(cudaFree(momentsAlloc));
     CUDA_CHECK(cudaFree(dbufferAlloc));

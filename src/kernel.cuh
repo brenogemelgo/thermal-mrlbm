@@ -160,12 +160,6 @@ __global__ void streamCollide(
     const natural_t idx = global3(x, y, z);
     const uint8_t nodeType = boundaryMask(x, y, z);
 
-    if (nodeType == OUTFLOW)
-    {
-        copyOutflowMomentsFromLastPlane(moments, dbuffer, x, y, z, idx);
-        return;
-    }
-
     real_t rho = static_cast<real_t>(0);
     real_t ux = static_cast<real_t>(0);
     real_t uy = static_cast<real_t>(0);
@@ -233,7 +227,7 @@ __global__ void streamCollide(
     tuy *= VelocitySet::scaleI();
     tuz *= VelocitySet::scaleI();
 
-    const real_t buoyancy = (nodeType == BULK) ? BETA_THERMAL * THERMAL_FORCE_SCALE * (temp - T_REF) : static_cast<real_t>(0);
+    const real_t buoyancy = (ENABLE_BUOYANCY && nodeType == BULK) ? BETA_THERMAL * (temp - T_REF) : static_cast<real_t>(0);
     const real_t forceX = buoyancy * THERMAL_GRAVITY_X;
     const real_t forceY = buoyancy * THERMAL_GRAVITY_Y;
     const real_t forceZ = buoyancy * THERMAL_GRAVITY_Z;

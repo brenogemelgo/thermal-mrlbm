@@ -3,6 +3,7 @@
 #include "D3Q7.cuh"
 #include "deviceFunctions.cuh"
 
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -10,6 +11,7 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -80,21 +82,126 @@ static inline std::string outputStepName(const natural_t step)
     return name.str();
 }
 
-static inline std::filesystem::path &simulationOutputDirectory()
+static inline std::string outputCaseFolderName()
 {
-    static std::filesystem::path dir("output/default");
-    return dir;
+    std::string name(ActiveCase::NAME);
+    for (char &c : name)
+    {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    }
+    return name;
 }
 
-static inline void setSimulationOutputDirectory(
-    const std::filesystem::path &dir)
+static inline std::filesystem::path getSimulationOutputDirectory()
 {
-    simulationOutputDirectory() = dir;
+    return std::filesystem::path("output") / outputCaseFolderName() / "000";
 }
 
-static inline const std::filesystem::path &getSimulationOutputDirectory()
+static inline std::filesystem::path getBinaryOutputDirectory()
 {
-    return simulationOutputDirectory();
+    return getSimulationOutputDirectory() / "binaries";
+}
+
+static inline std::filesystem::path getVtiOutputDirectory()
+{
+    return getSimulationOutputDirectory() / "vtis";
+}
+
+static inline std::filesystem::path getMetadataPath()
+{
+    return getSimulationOutputDirectory() / "metadata.txt";
+}
+
+static inline void createOutputDirectories()
+{
+    std::filesystem::create_directories(getBinaryOutputDirectory());
+    std::filesystem::create_directories(getVtiOutputDirectory());
+}
+
+static inline void writeMetadata()
+{
+    createOutputDirectories();
+
+    std::ofstream out(getMetadataPath());
+    if (!out)
+    {
+        std::cerr << "Could not open metadata output: " << getMetadataPath() << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+
+    out << std::boolalpha << std::setprecision(17);
+    out << "case_name = " << ActiveCase::NAME << '\n';
+    out << "NX = " << NX << '\n';
+    out << "NY = " << NY << '\n';
+    out << "NZ = " << NZ << '\n';
+    out << "NSTEPS = " << NSTEPS << '\n';
+    out << "STAMP = " << STAMP << '\n';
+    out << '\n';
+
+    out << "NU = " << static_cast<double>(VISCOSITY) << '\n';
+    out << "ALPHA = " << static_cast<double>(THERMAL_DIFFUSIVITY) << '\n';
+    out << "PR = " << static_cast<double>(PRANDTL) << '\n';
+    out << "RHO0 = " << static_cast<double>(ActiveCase::RHO0) << '\n';
+    out << '\n';
+
+    out << "ENABLE_BUOYANCY = " << ENABLE_BUOYANCY << '\n';
+    out << "ENABLE_INLET = " << ENABLE_INLET << '\n';
+    out << "ENABLE_WALLS = " << ENABLE_WALLS << '\n';
+    out << "ENABLE_OUTFLOW = " << ENABLE_OUTFLOW << '\n';
+    out << '\n';
+
+    out << "PERIODIC_X = " << PERIODIC_X << '\n';
+    out << "PERIODIC_Y = " << PERIODIC_Y << '\n';
+    out << "PERIODIC_Z = " << PERIODIC_Z << '\n';
+    out << '\n';
+
+    out << "GRAVITY_X = " << static_cast<double>(THERMAL_GRAVITY_X) << '\n';
+    out << "GRAVITY_Y = " << static_cast<double>(THERMAL_GRAVITY_Y) << '\n';
+    out << "GRAVITY_Z = " << static_cast<double>(THERMAL_GRAVITY_Z) << '\n';
+    out << '\n';
+
+    out << "THOT = " << static_cast<double>(T_HOT) << '\n';
+    out << "TCOLD = " << static_cast<double>(T_COLD) << '\n';
+    out << "T_REF = " << static_cast<double>(T_REF) << '\n';
+    out << "GBETA = " << static_cast<double>(BETA_THERMAL) << '\n';
+
+#if defined(CASE_FOURIER)
+    out << '\n';
+    out << "T0 = " << static_cast<double>(ActiveCase::T0) << '\n';
+    out << "AMP_T = " << static_cast<double>(ActiveCase::AMP_T) << '\n';
+    out << "UX0 = " << static_cast<double>(ActiveCase::UX0) << '\n';
+    out << "UY0 = " << static_cast<double>(ActiveCase::UY0) << '\n';
+    out << "UZ0 = " << static_cast<double>(ActiveCase::UZ0) << '\n';
+    out << "MODE_X = " << ActiveCase::MODE_X << '\n';
+    out << "MODE_Y = " << ActiveCase::MODE_Y << '\n';
+    out << "MODE_Z = " << ActiveCase::MODE_Z << '\n';
+    out << "KX = " << static_cast<double>(ActiveCase::KX) << '\n';
+    out << "KY = " << static_cast<double>(ActiveCase::KY) << '\n';
+    out << "KZ = " << static_cast<double>(ActiveCase::KZ) << '\n';
+    out << "K2 = " << static_cast<double>(ActiveCase::K2) << '\n';
+    out << "DECAY_RATE = " << static_cast<double>(ActiveCase::DECAY_RATE) << '\n';
+#elif defined(CASE_CAVITY)
+    out << '\n';
+    out << "RA = " << static_cast<double>(ActiveCase::RA) << '\n';
+    out << "DELTA_T = " << static_cast<double>(ActiveCase::DELTA_T) << '\n';
+    out << "L_CAVITY = " << static_cast<double>(ActiveCase::L_CAVITY) << '\n';
+    out << "UFREEFALL_TARGET = " << static_cast<double>(ActiveCase::UFREEFALL_TARGET) << '\n';
+#elif defined(CASE_JET)
+    out << '\n';
+    out << "U_JET = " << static_cast<double>(ActiveCase::U_JET) << '\n';
+    out << "D_JET = " << static_cast<double>(ActiveCase::D_JET) << '\n';
+    out << "RE = " << static_cast<double>(ActiveCase::RE) << '\n';
+    out << "RI = " << static_cast<double>(ActiveCase::RI) << '\n';
+    out << "T_INLET = " << static_cast<double>(ActiveCase::T_INLET) << '\n';
+    out << "T_AMBIENT = " << static_cast<double>(ActiveCase::T_AMBIENT) << '\n';
+    out << "DELTA_T = " << static_cast<double>(ActiveCase::DELTA_T) << '\n';
+#endif
+}
+
+static inline void initializeOutputLayout()
+{
+    createOutputDirectories();
+    writeMetadata();
 }
 
 static inline void writeBinary(
@@ -162,7 +269,7 @@ static inline bool findLatestOutputBinary(
     std::filesystem::path &binaryPath,
     natural_t &step)
 {
-    const std::filesystem::path dir = getSimulationOutputDirectory();
+    const std::filesystem::path dir = getBinaryOutputDirectory();
     if (!std::filesystem::exists(dir))
     {
         return false;
@@ -238,7 +345,7 @@ static inline natural_t loadLatestCheckpoint(
     natural_t step = 0;
     if (!findLatestOutputBinary(binaryPath, step))
     {
-        std::cerr << "No checkpoint found in " << getSimulationOutputDirectory() << std::endl;
+        std::cerr << "No checkpoint found in " << getBinaryOutputDirectory() << std::endl;
         std::exit(EXIT_FAILURE);
     }
 
@@ -319,12 +426,11 @@ static inline void writeOutput(
     const real_t *deviceMoments,
     const natural_t step)
 {
-    const std::filesystem::path dir = getSimulationOutputDirectory();
-    std::filesystem::create_directories(dir);
+    createOutputDirectories();
 
     const std::string base = outputStepName(step);
-    const std::filesystem::path binaryPath = dir / (base + ".bin");
-    const std::filesystem::path vtiPath = dir / (base + ".vti");
+    const std::filesystem::path binaryPath = getBinaryOutputDirectory() / (base + ".bin");
+    const std::filesystem::path vtiPath = getVtiOutputDirectory() / (base + ".vti");
 
     writeBinary(deviceMoments, binaryPath);
     writeVti(binaryPath, vtiPath);

@@ -65,6 +65,25 @@ int main(int argc, char **argv)
     real_t *momentsAlloc = moments;
     real_t *dbufferAlloc = dbuffer;
 
+#if defined(CASE_JET)
+    constexpr size_t scalarBytes = static_cast<size_t>(CELLS) * sizeof(real_t);
+    real_t *temperatureAccum = nullptr;
+    real_t *uzAccum = nullptr;
+    real_t *temperatureMean = nullptr;
+    real_t *uzMean = nullptr;
+    natural_t timeAverageCount = 0u;
+
+    if constexpr (ActiveCase::timeAverageEnabled)
+    {
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&temperatureAccum), scalarBytes));
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&uzAccum), scalarBytes));
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&temperatureMean), scalarBytes));
+        CUDA_CHECK(cudaMalloc(reinterpret_cast<void **>(&uzMean), scalarBytes));
+        CUDA_CHECK(cudaMemset(temperatureAccum, 0, scalarBytes));
+        CUDA_CHECK(cudaMemset(uzAccum, 0, scalarBytes));
+    }
+#endif
+
     constexpr dim3 block(BLOCK_NX, BLOCK_NY, BLOCK_NZ);
     constexpr dim3 grid(GRID_X, GRID_Y, GRID_Z);
 
@@ -112,6 +131,20 @@ int main(int argc, char **argv)
         streamCollide<<<grid, block>>>(moments, dbuffer, t);
         std::swap(moments, dbuffer);
 
+#if defined(CASE_JET)
+        if constexpr (ActiveCase::timeAverageEnabled)
+        {
+            constexpr natural_t timeAverageStride = ActiveCase::timeAverageStride > 0u ? ActiveCase::timeAverageStride : 1u;
+            const natural_t sampleStep = t + 1u;
+            if (sampleStep >= ActiveCase::timeAverageStart &&
+                ((sampleStep - ActiveCase::timeAverageStart) % timeAverageStride) == 0u)
+            {
+                accumulateJetTimeAverage<<<grid, block>>>(moments, temperatureAccum, uzAccum);
+                ++timeAverageCount;
+            }
+        }
+#endif
+
 #ifndef BENCHMARK
         if ((t + 1) % STAMP == 0)
         {
@@ -146,7 +179,39 @@ int main(int argc, char **argv)
     std::cout << "elapsed: " << elapsed.count() << " s" << std::endl;
     std::cout << "MLUPS: " << mlups << std::endl;
 
+#if defined(CASE_JET)
+    if constexpr (ActiveCase::timeAverageEnabled)
+    {
+        if (timeAverageCount > 0u)
+        {
+            finalizeJetTimeAverage<<<grid, block>>>(
+                temperatureAccum,
+                uzAccum,
+                temperatureMean,
+                uzMean,
+                timeAverageCount);
+            CUDA_CHECK(cudaGetLastError());
+            CUDA_CHECK(cudaDeviceSynchronize());
+
+            writeScalarOutput(temperatureMean, "temperatureMean");
+            writeScalarOutput(uzMean, "uzMean");
+        }
+
+        writeMetadata(timeAverageCount);
+        std::cout << "time-average samples: " << timeAverageCount << std::endl;
+    }
+#endif
+
     CUDA_CHECK(cudaFree(momentsAlloc));
     CUDA_CHECK(cudaFree(dbufferAlloc));
+#if defined(CASE_JET)
+    if constexpr (ActiveCase::timeAverageEnabled)
+    {
+        CUDA_CHECK(cudaFree(temperatureAccum));
+        CUDA_CHECK(cudaFree(uzAccum));
+        CUDA_CHECK(cudaFree(temperatureMean));
+        CUDA_CHECK(cudaFree(uzMean));
+    }
+#endif
     return 0;
 }

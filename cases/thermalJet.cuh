@@ -11,6 +11,10 @@ struct ThermalJetCase
     static constexpr natural_t NSTEPS = 100000;
     static constexpr natural_t STAMP = 1000;
 
+    static constexpr bool timeAverageEnabled = true;
+    static constexpr natural_t timeAverageStart = NSTEPS / 2u;
+    static constexpr natural_t timeAverageStride = 1u;
+
     static constexpr real_t U_JET = static_cast<real_t>(0.01);
     static constexpr real_t D_JET = static_cast<real_t>(20);
 

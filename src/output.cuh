@@ -118,7 +118,8 @@ static inline void createOutputDirectories()
     std::filesystem::create_directories(getVtiOutputDirectory());
 }
 
-static inline void writeMetadata()
+static inline void writeMetadata(
+    const natural_t timeAverageCount = 0u)
 {
     createOutputDirectories();
 
@@ -130,7 +131,7 @@ static inline void writeMetadata()
     }
 
     out << std::boolalpha << std::setprecision(17);
-    out << "case_name = " << ActiveCase::NAME << '\n';
+    out << "caseName = " << ActiveCase::NAME << '\n';
     out << "NX = " << NX << '\n';
     out << "NY = " << NY << '\n';
     out << "NZ = " << NZ << '\n';
@@ -142,6 +143,7 @@ static inline void writeMetadata()
     out << "ALPHA = " << static_cast<double>(THERMAL_DIFFUSIVITY) << '\n';
     out << "PR = " << static_cast<double>(PRANDTL) << '\n';
     out << "RHO0 = " << static_cast<double>(ActiveCase::RHO0) << '\n';
+    out << "velocityScaleI = " << static_cast<double>(VelocitySet::scaleI()) << '\n';
     out << '\n';
 
     out << "ENABLE_BUOYANCY = " << ENABLE_BUOYANCY << '\n';
@@ -166,6 +168,8 @@ static inline void writeMetadata()
     out << "GBETA = " << static_cast<double>(BETA_THERMAL) << '\n';
 
 #if defined(CASE_FOURIER)
+    out << "timeAverageEnabled = false" << '\n';
+    out << "timeAverageCount = 0" << '\n';
     out << '\n';
     out << "T0 = " << static_cast<double>(ActiveCase::T0) << '\n';
     out << "AMP_T = " << static_cast<double>(ActiveCase::AMP_T) << '\n';
@@ -181,12 +185,18 @@ static inline void writeMetadata()
     out << "K2 = " << static_cast<double>(ActiveCase::K2) << '\n';
     out << "DECAY_RATE = " << static_cast<double>(ActiveCase::DECAY_RATE) << '\n';
 #elif defined(CASE_CAVITY)
+    out << "timeAverageEnabled = false" << '\n';
+    out << "timeAverageCount = 0" << '\n';
     out << '\n';
     out << "RA = " << static_cast<double>(ActiveCase::RA) << '\n';
     out << "DELTA_T = " << static_cast<double>(ActiveCase::DELTA_T) << '\n';
     out << "L_CAVITY = " << static_cast<double>(ActiveCase::L_CAVITY) << '\n';
     out << "UFREEFALL_TARGET = " << static_cast<double>(ActiveCase::UFREEFALL_TARGET) << '\n';
 #elif defined(CASE_JET)
+    out << "timeAverageEnabled = " << ActiveCase::timeAverageEnabled << '\n';
+    out << "timeAverageStart = " << ActiveCase::timeAverageStart << '\n';
+    out << "timeAverageStride = " << ActiveCase::timeAverageStride << '\n';
+    out << "timeAverageCount = " << timeAverageCount << '\n';
     out << '\n';
     out << "U_JET = " << static_cast<double>(ActiveCase::U_JET) << '\n';
     out << "D_JET = " << static_cast<double>(ActiveCase::D_JET) << '\n';
@@ -422,6 +432,98 @@ static inline void writeVti(
     vti << "</VTKFile>\n";
 }
 
+static inline void writeScalarBinary(
+    const real_t *deviceField,
+    const std::filesystem::path &path)
+{
+    std::ofstream out(path, std::ios::binary);
+    if (!out)
+    {
+        std::cerr << "Could not open scalar binary output: " << path << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+
+    std::vector<real_t> fieldData(CELLS);
+    outputCheckCuda(
+        cudaMemcpy(fieldData.data(), deviceField, CELLS * sizeof(real_t), cudaMemcpyDeviceToHost),
+        "cudaMemcpy scalar binary field");
+
+    out.write(reinterpret_cast<const char *>(fieldData.data()), static_cast<std::streamsize>(CELLS * sizeof(real_t)));
+    if (!out)
+    {
+        std::cerr << "Could not write scalar binary output: " << path << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+}
+
+static inline void writeScalarVti(
+    const std::filesystem::path &binaryPath,
+    const std::filesystem::path &vtiPath,
+    const char *fieldName)
+{
+    std::ifstream bin(binaryPath, std::ios::binary);
+    if (!bin)
+    {
+        std::cerr << "Could not open scalar binary input for VTI: " << binaryPath << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+
+    std::ofstream vti(vtiPath, std::ios::binary);
+    if (!vti)
+    {
+        std::cerr << "Could not open scalar VTI output: " << vtiPath << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+
+    constexpr std::uint64_t fieldBytes = static_cast<std::uint64_t>(CELLS) * static_cast<std::uint64_t>(sizeof(real_t));
+
+    vti << "<?xml version=\"1.0\"?>\n";
+    vti << "<VTKFile type=\"ImageData\" version=\"1.0\" byte_order=\"LittleEndian\" header_type=\"UInt64\">\n";
+    vti << "  <ImageData WholeExtent=\"0 " << (NX - 1) << " 0 " << (NY - 1) << " 0 " << (NZ - 1)
+        << "\" Origin=\"0 0 0\" Spacing=\"1 1 1\">\n";
+    vti << "    <Piece Extent=\"0 " << (NX - 1) << " 0 " << (NY - 1) << " 0 " << (NZ - 1) << "\">\n";
+    vti << "      <PointData Scalars=\"" << fieldName << "\">\n";
+    vti << "        <DataArray type=\"" << outputVtkRealType() << "\" Name=\"" << fieldName
+        << "\" NumberOfComponents=\"1\" format=\"appended\" offset=\"0\"/>\n";
+    vti << "      </PointData>\n";
+    vti << "      <CellData/>\n";
+    vti << "    </Piece>\n";
+    vti << "  </ImageData>\n";
+    vti << "  <AppendedData encoding=\"raw\">\n_";
+
+    std::vector<real_t> fieldData(CELLS);
+    bin.read(reinterpret_cast<char *>(fieldData.data()), static_cast<std::streamsize>(fieldBytes));
+    if (!bin)
+    {
+        std::cerr << "Could not read scalar binary field for VTI: " << binaryPath << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+
+    vti.write(reinterpret_cast<const char *>(&fieldBytes), sizeof(fieldBytes));
+    vti.write(reinterpret_cast<const char *>(fieldData.data()), static_cast<std::streamsize>(fieldBytes));
+    if (!vti)
+    {
+        std::cerr << "Could not write scalar VTI output: " << vtiPath << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+
+    vti << "\n  </AppendedData>\n";
+    vti << "</VTKFile>\n";
+}
+
+static inline void writeScalarOutput(
+    const real_t *deviceField,
+    const char *fieldName)
+{
+    createOutputDirectories();
+
+    const std::filesystem::path binaryPath = getBinaryOutputDirectory() / (std::string(fieldName) + ".bin");
+    const std::filesystem::path vtiPath = getVtiOutputDirectory() / (std::string(fieldName) + ".vti");
+
+    writeScalarBinary(deviceField, binaryPath);
+    writeScalarVti(binaryPath, vtiPath, fieldName);
+}
+
 static inline void writeOutput(
     const real_t *deviceMoments,
     const natural_t step)
@@ -434,4 +536,48 @@ static inline void writeOutput(
 
     writeBinary(deviceMoments, binaryPath);
     writeVti(binaryPath, vtiPath);
+}
+
+__global__ void accumulateJetTimeAverage(
+    const real_t *__restrict__ moments,
+    real_t *__restrict__ temperatureAccum,
+    real_t *__restrict__ uzAccum)
+{
+    const natural_t x = blockIdx.x * BLOCK_NX + threadIdx.x;
+    const natural_t y = blockIdx.y * BLOCK_NY + threadIdx.y;
+    const natural_t z = blockIdx.z * BLOCK_NZ + threadIdx.z;
+
+    if (x >= NX || y >= NY || z >= NZ)
+    {
+        return;
+    }
+
+    const natural_t idx = global3(x, y, z);
+    temperatureAccum[idx] += loadMoment(moments, idx, TEMP);
+    uzAccum[idx] += loadMoment(moments, idx, UZ) / VelocitySet::scaleI();
+}
+
+__global__ void finalizeJetTimeAverage(
+    const real_t *__restrict__ temperatureAccum,
+    const real_t *__restrict__ uzAccum,
+    real_t *__restrict__ temperatureMean,
+    real_t *__restrict__ uzMean,
+    const natural_t timeAverageCount)
+{
+    const natural_t x = blockIdx.x * BLOCK_NX + threadIdx.x;
+    const natural_t y = blockIdx.y * BLOCK_NY + threadIdx.y;
+    const natural_t z = blockIdx.z * BLOCK_NZ + threadIdx.z;
+
+    if (x >= NX || y >= NY || z >= NZ)
+    {
+        return;
+    }
+
+    const natural_t idx = global3(x, y, z);
+    const real_t invCount = timeAverageCount > 0u
+                                ? static_cast<real_t>(1) / static_cast<real_t>(timeAverageCount)
+                                : static_cast<real_t>(0);
+
+    temperatureMean[idx] = temperatureAccum[idx] * invCount;
+    uzMean[idx] = uzAccum[idx] * invCount;
 }

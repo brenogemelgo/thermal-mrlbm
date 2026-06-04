@@ -36,11 +36,6 @@ __device__ static __forceinline__ void initialPrimitiveFields(
         uy = ActiveCase::UY0;
         uz = ActiveCase::UZ0;
         temperature = ActiveCase::T0 + ActiveCase::AMP_T * caseFourierSin(phase);
-#elif defined(CASE_CAVITY)
-        const real_t xNorm = NX > 1u
-                                 ? static_cast<real_t>(x) / static_cast<real_t>(NX - 1u)
-                                 : static_cast<real_t>(0);
-        temperature = T_HOT + (T_COLD - T_HOT) * xNorm;
 #elif defined(CASE_SLOT)
         const real_t xNorm = ActiveCase::L_SLOT > static_cast<real_t>(0)
                                  ? static_cast<real_t>(x) / ActiveCase::L_SLOT

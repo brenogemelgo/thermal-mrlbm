@@ -3,7 +3,7 @@ runId = "000"
 selectedStep = None
 outputRoot = "output"
 showPlots = False
-figureDpi = 200
+figureDpi = 600
 
 import numpy as np
 import matplotlib
@@ -29,7 +29,9 @@ from postCommon import (
 )
 
 
-def saveJetPlots(postDir, metadata, stepValue, thetaValues, uzValues, thetaMeanValues, uzMeanValues):
+def saveJetPlots(
+    postDir, metadata, stepValue, thetaValues, uzValues, thetaMeanValues, uzMeanValues
+):
     nx = getInt(metadata, "NX")
     ny = getInt(metadata, "NY")
     nz = getInt(metadata, "NZ")
@@ -45,7 +47,12 @@ def saveJetPlots(postDir, metadata, stepValue, thetaValues, uzValues, thetaMeanV
     )
 
     plt.figure(figsize=(7, 5))
-    plt.imshow(thetaValues[:, centerY, :], origin="lower", extent=(0, nx - 1, 0, nz - 1), aspect="auto")
+    plt.imshow(
+        thetaValues[:, centerY, :],
+        origin="lower",
+        extent=(0, nx - 1, 0, nz - 1),
+        aspect="auto",
+    )
     plt.colorbar(label="theta")
     plt.xlabel("x")
     plt.ylabel("z")
@@ -63,7 +70,12 @@ def saveJetPlots(postDir, metadata, stepValue, thetaValues, uzValues, thetaMeanV
     )
 
     plt.figure(figsize=(7, 5))
-    plt.imshow(uzValues[:, centerY, :], origin="lower", extent=(0, nx - 1, 0, nz - 1), aspect="auto")
+    plt.imshow(
+        uzValues[:, centerY, :],
+        origin="lower",
+        extent=(0, nx - 1, 0, nz - 1),
+        aspect="auto",
+    )
     plt.colorbar(label="uz")
     plt.xlabel("x")
     plt.ylabel("z")
@@ -121,7 +133,9 @@ def main():
     metadata = readMetadata(runDir)
     postDir = getPostDir(runDir)
 
-    temperatureValues, stepValue = readScalarField(runDir, metadata, "temperature", selectedStep)
+    temperatureValues, stepValue = readScalarField(
+        runDir, metadata, "temperature", selectedStep
+    )
     uzValues, stepValue = readScalarField(runDir, metadata, "uz", stepValue)
 
     tInlet = getFloat(metadata, "T_INLET")
@@ -131,7 +145,9 @@ def main():
         raise RuntimeError("Cannot compute theta because T_INLET - T_AMBIENT is zero")
 
     thetaValues = (temperatureValues - tAmbient) / deltaT
-    temperatureMeanValues = tryReadStandaloneScalarField(runDir, metadata, "temperatureMean")
+    temperatureMeanValues = tryReadStandaloneScalarField(
+        runDir, metadata, "temperatureMean"
+    )
     uzMeanValues = tryReadStandaloneScalarField(runDir, metadata, "uzMean")
     thetaMeanValues = None
     if temperatureMeanValues is not None:
@@ -170,7 +186,15 @@ def main():
         )
 
     writeReport(postDir / "jetReport.txt", reportLines)
-    saveJetPlots(postDir, metadata, stepValue, thetaValues, uzValues, thetaMeanValues, uzMeanValues)
+    saveJetPlots(
+        postDir,
+        metadata,
+        stepValue,
+        thetaValues,
+        uzValues,
+        thetaMeanValues,
+        uzMeanValues,
+    )
 
 
 main()

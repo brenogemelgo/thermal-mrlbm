@@ -38,28 +38,19 @@ using real_t = float;
 #include "../cases/fourierAdvectionDiffusion.cuh"
 using ActiveCase = FourierAdvectionDiffusionCase;
 constexpr bool CASE_IS_FOURIER = true;
-constexpr bool CASE_IS_CAVITY = false;
-constexpr bool CASE_IS_JET = false;
-#elif defined(CASE_CAVITY)
-#include "../cases/heatedCavity.cuh"
-using ActiveCase = HeatedCavityCase;
-constexpr bool CASE_IS_FOURIER = false;
-constexpr bool CASE_IS_CAVITY = true;
 constexpr bool CASE_IS_JET = false;
 #elif defined(CASE_SLOT)
 #include "../cases/verticalBuoyantSlot.cuh"
 using ActiveCase = VerticalBuoyantSlotCase;
 constexpr bool CASE_IS_FOURIER = false;
-constexpr bool CASE_IS_CAVITY = false;
 constexpr bool CASE_IS_JET = false;
 #elif defined(CASE_JET)
 #include "../cases/thermalJet.cuh"
 using ActiveCase = ThermalJetCase;
 constexpr bool CASE_IS_FOURIER = false;
-constexpr bool CASE_IS_CAVITY = false;
 constexpr bool CASE_IS_JET = true;
 #else
-#error "No case selected. Compile with -DCASE_FOURIER, -DCASE_CAVITY, -DCASE_SLOT, or -DCASE_JET."
+#error "No case selected. Compile with -DCASE_FOURIER, -DCASE_SLOT, or -DCASE_JET."
 #endif
 
 // =================================================================================================== //
@@ -103,9 +94,9 @@ constexpr bool ENABLE_SMOOTH_JET_PROFILE = false;
 constexpr real_t JET_AMBIENT_UZ = static_cast<real_t>(0);
 constexpr real_t JET_INLET_SHEAR_THICKNESS_CELLS = static_cast<real_t>(2);
 constexpr real_t JET_INLET_HALO_THICKNESS_CELLS = static_cast<real_t>(2) * JET_INLET_SHEAR_THICKNESS_CELLS;
-constexpr bool SMOOTH_INLET_TEMPERATURE = true;
+constexpr bool SMOOTH_INLET_TEMPERATURE = false;
 
-constexpr bool ENABLE_SYNTHETIC_TURBULENT_INFLOW = true;
+constexpr bool ENABLE_SYNTHETIC_TURBULENT_INFLOW = CASE_IS_JET;
 
 constexpr natural_t TURBULENT_INFLOW_MODES = 16;
 constexpr real_t TURBULENT_INFLOW_INTENSITY_RADIAL = static_cast<real_t>(0.04);

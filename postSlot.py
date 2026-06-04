@@ -3,7 +3,7 @@ runId = "000"
 selectedStep = None
 outputRoot = "output"
 showPlots = False
-figureDpi = 200
+figureDpi = 600
 
 import numpy as np
 import matplotlib
@@ -30,7 +30,11 @@ def analyticalSlotProfiles(metadata):
     lSlot = getFloat(metadata, "L_SLOT")
     tHot = getFloat(metadata, "THOT")
     deltaT = getFloat(metadata, "DELTA_T")
-    slotVelocityScale = getFloat(metadata, "slotVelocityScale")
+    slotVelocityScale = getFloat(
+        metadata,
+        "slotVelocityScale",
+        getFloat(metadata, "GBETA") * deltaT * lSlot * lSlot / getFloat(metadata, "NU"),
+    )
 
     xIndex = np.arange(nx)
     xCoord = xIndex / lSlot
@@ -45,7 +49,9 @@ def relativeL2Error(numericalValues, analyticalValues):
     return np.linalg.norm(errorValues) / denominator
 
 
-def saveSlotPlots(postDir, stepValue, xCoord, temperatureProfile, temperatureAna, uyProfile, uyAna):
+def saveSlotPlots(
+    postDir, stepValue, xCoord, temperatureProfile, temperatureAna, uyProfile, uyAna
+):
     temperatureError = temperatureProfile - temperatureAna
     uyError = uyProfile - uyAna
 
@@ -109,7 +115,9 @@ def main():
     metadata = readMetadata(runDir)
     postDir = getPostDir(runDir)
 
-    temperatureValues, stepValue = readScalarField(runDir, metadata, "temperature", selectedStep)
+    temperatureValues, stepValue = readScalarField(
+        runDir, metadata, "temperature", selectedStep
+    )
     uyValues, stepValue = readScalarField(runDir, metadata, "uy", stepValue)
 
     xIndex, xCoord, temperatureAna, uyAna = analyticalSlotProfiles(metadata)
@@ -118,9 +126,25 @@ def main():
 
     temperatureError = temperatureProfile - temperatureAna
     uyError = uyProfile - uyAna
-    analyticalMaxAbsUy = getFloat(metadata, "slotVelocityScale") * np.sqrt(3.0) / 216.0
+    slotProfileMaxFactor = getFloat(
+        metadata, "slotProfileMaxFactor", np.sqrt(3.0) / 216.0
+    )
+    slotVelocityScale = getFloat(
+        metadata,
+        "slotVelocityScale",
+        getFloat(metadata, "GBETA")
+        * getFloat(metadata, "DELTA_T")
+        * getFloat(metadata, "L_SLOT")
+        * getFloat(metadata, "L_SLOT")
+        / getFloat(metadata, "NU"),
+    )
+    analyticalMaxAbsUy = getFloat(
+        metadata, "analyticalMaxAbsUy", slotVelocityScale * slotProfileMaxFactor
+    )
     numericalMaxAbsUy = np.max(np.abs(uyProfile))
-    relativeMaxUyError = abs(numericalMaxAbsUy - analyticalMaxAbsUy) / max(abs(analyticalMaxAbsUy), 1.0e-30)
+    relativeMaxUyError = abs(numericalMaxAbsUy - analyticalMaxAbsUy) / max(
+        abs(analyticalMaxAbsUy), 1.0e-30
+    )
     netFlowRate = np.sum(
         (uyProfile[:-1] + uyProfile[1:]) * (xCoord[1:] - xCoord[:-1]) * 0.5
     )
@@ -139,7 +163,16 @@ def main():
             "temperatureError",
             "uyError",
         ],
-        [xIndex, xCoord, temperatureProfile, temperatureAna, uyProfile, uyAna, temperatureError, uyError],
+        [
+            xIndex,
+            xCoord,
+            temperatureProfile,
+            temperatureAna,
+            uyProfile,
+            uyAna,
+            temperatureError,
+            uyError,
+        ],
     )
 
     reportLines = [
@@ -149,8 +182,11 @@ def main():
         f"PR = {getFloat(metadata, 'PR')}",
         f"GBETA = {getFloat(metadata, 'GBETA')}",
         f"L_SLOT = {getFloat(metadata, 'L_SLOT')}",
-        f"targetUyMax = {getFloat(metadata, 'targetUyMax')}",
-        f"slotVelocityScale = {getFloat(metadata, 'slotVelocityScale')}",
+        f"RA = {getFloat(metadata, 'RA')}",
+        f"RA_TARGET = {getFloat(metadata, 'RA_TARGET', getFloat(metadata, 'RA'))}",
+        f"U_CHAR = {getFloat(metadata, 'U_CHAR')}",
+        f"slotProfileMaxFactor = {slotProfileMaxFactor}",
+        f"slotVelocityScale = {slotVelocityScale}",
         f"analyticalMaxAbsUy = {analyticalMaxAbsUy:.17g}",
         f"numericalMaxAbsUy = {numericalMaxAbsUy:.17g}",
         f"relativeMaxUyError = {relativeMaxUyError:.17g}",
@@ -164,7 +200,9 @@ def main():
         f"uyStdYZ = {uyStdYZ:.17g}",
     ]
     writeReport(postDir / "slotReport.txt", reportLines)
-    saveSlotPlots(postDir, stepValue, xCoord, temperatureProfile, temperatureAna, uyProfile, uyAna)
+    saveSlotPlots(
+        postDir, stepValue, xCoord, temperatureProfile, temperatureAna, uyProfile, uyAna
+    )
 
 
 main()

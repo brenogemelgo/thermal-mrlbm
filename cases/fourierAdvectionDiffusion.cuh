@@ -1,19 +1,36 @@
 #pragma once
 
+#include "aux/functions.cuh"
+
 struct FourierAdvectionDiffusionCase
 {
     static constexpr const char *NAME = "FOURIER";
 
-    static constexpr natural_t MESH = 32; // 32, 64, 128
+#if defined(FOURIER_MESH)
+    static constexpr natural_t MESH = static_cast<natural_t>(FOURIER_MESH);
+    static constexpr natural_t NSTEPS = 20000;
+    static constexpr natural_t STAMP = 1000;
+#elif defined(CASE_ONE)
+    static constexpr natural_t MESH = 64;
+    static constexpr natural_t NSTEPS = 20000;
+    static constexpr natural_t STAMP = 1000;
+#elif defined(CASE_TWO)
+    static constexpr natural_t MESH = 128;
+    static constexpr natural_t NSTEPS = 20000;
+    static constexpr natural_t STAMP = 1000;
+#else
+    static constexpr natural_t MESH = 256;
+    static constexpr natural_t NSTEPS = 20000;
+    static constexpr natural_t STAMP = 1000;
+#endif
+
     static constexpr natural_t NX = MESH;
     static constexpr natural_t NY = MESH;
     static constexpr natural_t NZ = MESH;
 
-    static constexpr natural_t NSTEPS = 5000; // 5000, 10000, 20000
-    static constexpr natural_t STAMP = 250;   // 250, 500, 1000
-
     static constexpr real_t T0 = static_cast<real_t>(1);
     static constexpr real_t AMP_T = static_cast<real_t>(1.0e-2);
+
     static constexpr real_t THOT = T0 + AMP_T;
     static constexpr real_t TCOLD = T0 - AMP_T;
 
@@ -26,13 +43,21 @@ struct FourierAdvectionDiffusionCase
     static constexpr natural_t MODE_Z = 1;
 
     static constexpr real_t TWO_PI = static_cast<real_t>(6.2831853071795864769);
-    static constexpr real_t KX = TWO_PI * static_cast<real_t>(MODE_X) / static_cast<real_t>(NX);
-    static constexpr real_t KY = TWO_PI * static_cast<real_t>(MODE_Y) / static_cast<real_t>(NY);
-    static constexpr real_t KZ = TWO_PI * static_cast<real_t>(MODE_Z) / static_cast<real_t>(NZ);
+
+    static constexpr real_t KX =
+        TWO_PI * static_cast<real_t>(MODE_X) / static_cast<real_t>(NX);
+
+    static constexpr real_t KY =
+        TWO_PI * static_cast<real_t>(MODE_Y) / static_cast<real_t>(NY);
+
+    static constexpr real_t KZ =
+        TWO_PI * static_cast<real_t>(MODE_Z) / static_cast<real_t>(NZ);
+
     static constexpr real_t K2 = KX * KX + KY * KY + KZ * KZ;
 
     static constexpr real_t NU = static_cast<real_t>(0.01);
     static constexpr real_t ALPHA = static_cast<real_t>(0.005);
+
     static constexpr real_t PR = NU / ALPHA;
     static constexpr real_t DECAY_RATE = ALPHA * K2;
 
@@ -50,10 +75,14 @@ struct FourierAdvectionDiffusionCase
     static constexpr real_t GRAVITY_Z = static_cast<real_t>(0);
 
     static constexpr real_t RHO0 = static_cast<real_t>(1);
+
     static constexpr real_t T_REF = T0;
     static constexpr real_t GBETA = static_cast<real_t>(0);
 
-    static constexpr real_t U_CHAR = UX0;
+    static constexpr real_t U_CHAR =
+        csqrt<real_t>(UX0 * UX0 + UY0 * UY0 + UZ0 * UZ0);
+
     static constexpr real_t L_CHAR = static_cast<real_t>(NX);
+
     static constexpr real_t RE = U_CHAR * L_CHAR / NU;
 };

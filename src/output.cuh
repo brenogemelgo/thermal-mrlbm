@@ -196,23 +196,17 @@ static inline void writeMetadata(
     out << "KZ = " << static_cast<double>(ActiveCase::KZ) << '\n';
     out << "K2 = " << static_cast<double>(ActiveCase::K2) << '\n';
     out << "DECAY_RATE = " << static_cast<double>(ActiveCase::DECAY_RATE) << '\n';
-#elif defined(CASE_CAVITY)
-    out << "timeAverageEnabled = false" << '\n';
-    out << "timeAverageCount = 0" << '\n';
-    out << '\n';
-    out << "RA = " << static_cast<double>(ActiveCase::RA) << '\n';
-    out << "DELTA_T = " << static_cast<double>(ActiveCase::DELTA_T) << '\n';
-    out << "L_CAVITY = " << static_cast<double>(ActiveCase::L_CAVITY) << '\n';
-    out << "UFREEFALL_TARGET = " << static_cast<double>(ActiveCase::UFREEFALL_TARGET) << '\n';
 #elif defined(CASE_SLOT)
     out << "timeAverageEnabled = false" << '\n';
     out << "timeAverageCount = 0" << '\n';
     out << '\n';
     out << "DELTA_T = " << static_cast<double>(ActiveCase::DELTA_T) << '\n';
     out << "L_SLOT = " << static_cast<double>(ActiveCase::L_SLOT) << '\n';
-    out << "targetUyMax = " << static_cast<double>(ActiveCase::targetUyMax) << '\n';
+    out << "U_CHAR = " << static_cast<double>(ActiveCase::U_CHAR) << '\n';
+    out << "RA_TARGET = " << static_cast<double>(ActiveCase::RA_TARGET) << '\n';
     out << "slotProfileMaxFactor = " << static_cast<double>(ActiveCase::slotProfileMaxFactor) << '\n';
     out << "slotVelocityScale = " << static_cast<double>(ActiveCase::slotVelocityScale) << '\n';
+    out << "analyticalMaxAbsUy = " << static_cast<double>(ActiveCase::analyticalMaxAbsUy) << '\n';
     out << "RE = " << static_cast<double>(ActiveCase::RE) << '\n';
     out << "RA = " << static_cast<double>(ActiveCase::RA) << '\n';
 #elif defined(CASE_JET)

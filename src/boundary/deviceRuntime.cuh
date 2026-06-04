@@ -135,7 +135,7 @@ __device__ static __forceinline__ void applyWallThermalBoundary(
     real_t &tuy,
     real_t &tuz) noexcept
 {
-#if defined(CASE_CAVITY) || defined(CASE_SLOT)
+#if defined(CASE_SLOT)
     if ((nodeType & XMIN_FACE) == XMIN_FACE)
     {
         temp = T_HOT;

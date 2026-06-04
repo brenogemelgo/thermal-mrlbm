@@ -4,23 +4,23 @@ struct ThermalJetCase
 {
     static constexpr const char *NAME = "JET";
 
-    static constexpr natural_t NX = 128;
-    static constexpr natural_t NY = 128;
-    static constexpr natural_t NZ = 256;
+    static constexpr natural_t NX = 245;
+    static constexpr natural_t NY = 245;
+    static constexpr natural_t NZ = 400;
 
-    static constexpr natural_t NSTEPS = 100000;
+    static constexpr natural_t NSTEPS = 200000;
     static constexpr natural_t STAMP = 1000;
 
     static constexpr bool timeAverageEnabled = true;
-    static constexpr natural_t timeAverageStart = NSTEPS / 2u;
+    static constexpr natural_t timeAverageStart = 60000;
     static constexpr natural_t timeAverageStride = 1u;
 
-    static constexpr real_t U_JET = static_cast<real_t>(0.01);
-    static constexpr real_t D_JET = static_cast<real_t>(20);
+    static constexpr real_t U_JET = static_cast<real_t>(0.02);
+    static constexpr real_t D_JET = static_cast<real_t>(30);
 
     static constexpr real_t RE = static_cast<real_t>(5000);
     static constexpr real_t PR = static_cast<real_t>(0.71);
-    static constexpr real_t RI = static_cast<real_t>(1);
+    static constexpr real_t RI = static_cast<real_t>(0.5);
 
     static constexpr real_t T_INLET = static_cast<real_t>(1);
     static constexpr real_t T_AMBIENT = static_cast<real_t>(0);

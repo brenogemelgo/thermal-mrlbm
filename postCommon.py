@@ -4,7 +4,6 @@ Shared post-processing helpers for thermal-mrlbm.
 Run the case scripts from the repository root:
 
     python postFourier.py
-    python postCavity.py
     python postSlot.py
     python postJet.py
 

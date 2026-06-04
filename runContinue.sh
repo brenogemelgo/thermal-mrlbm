@@ -4,6 +4,7 @@ set -euo pipefail
 CASE_NAME="${NAME:-}"
 runId="${RUN_ID:-}"
 extra_args=()
+caseVariantDefines=()
 
 for arg in "$@"; do
     if [[ "$arg" == NAME=* ]]; then
@@ -14,7 +15,7 @@ for arg in "$@"; do
         runId="${arg#RUNID=}"
     elif [[ "$arg" != --* ]]; then
         ARG_CASE_NAME="$(printf '%s' "$arg" | tr '[:lower:]' '[:upper:]')"
-        if [[ -z "$CASE_NAME" && ( "$ARG_CASE_NAME" == "FOURIER" || "$ARG_CASE_NAME" == "CAVITY" || "$ARG_CASE_NAME" == "SLOT" || "$ARG_CASE_NAME" == "JET" ) ]]; then
+        if [[ -z "$CASE_NAME" && ( "$ARG_CASE_NAME" == "FOURIER" || "$ARG_CASE_NAME" == "SLOT" || "$ARG_CASE_NAME" == "JET" ) ]]; then
             CASE_NAME="$ARG_CASE_NAME"
         elif [[ -z "$runId" ]]; then
             runId="$arg"
@@ -36,9 +37,6 @@ case "$CASE_NAME" in
     FOURIER)
         CASE_DEFINE="-DCASE_FOURIER"
         ;;
-    CAVITY)
-        CASE_DEFINE="-DCASE_CAVITY"
-        ;;
     SLOT)
         CASE_DEFINE="-DCASE_SLOT"
         ;;
@@ -46,7 +44,7 @@ case "$CASE_NAME" in
         CASE_DEFINE="-DCASE_JET"
         ;;
     *)
-        echo "Unknown NAME=$CASE_NAME. Use NAME=FOURIER, NAME=CAVITY, NAME=SLOT, or NAME=JET." >&2
+        echo "Unknown NAME=$CASE_NAME. Use NAME=FOURIER, NAME=SLOT, or NAME=JET." >&2
         exit 1
         ;;
 esac
@@ -64,8 +62,17 @@ if [[ -z "$runId" || "$runId" == "." || "$runId" == ".." || "$runId" == *"/"* ||
     exit 1
 fi
 
+if [[ "$CASE_NAME" == "FOURIER" && "$runId" =~ ^[0-9]+$ ]]; then
+    fourierMesh="$((10#$runId))"
+    case "$fourierMesh" in
+        32|64|128|256)
+            caseVariantDefines+=("-DFOURIER_MESH=${fourierMesh}")
+            ;;
+    esac
+fi
+
 mkdir -p "output/${case_lower}/${runId}"
 rm -f mrlbm
 
-nvcc -std=c++20 -O3 --restrict --expt-relaxed-constexpr --fmad=true --extra-device-vectorization --extended-lambda -arch=sm_86 -lineinfo -Xptxas -v "${CASE_DEFINE}" src/main.cu -o mrlbm
+nvcc -std=c++20 -O3 --restrict --expt-relaxed-constexpr --fmad=true --extra-device-vectorization --extended-lambda -arch=sm_86 -lineinfo -Xptxas -v "${CASE_DEFINE}" "${caseVariantDefines[@]}" src/main.cu -o mrlbm
 ./mrlbm --runId "$runId" "${extra_args[@]}" --continue

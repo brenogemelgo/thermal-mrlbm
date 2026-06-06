@@ -135,30 +135,14 @@ __device__ static __forceinline__ void applyWallThermalBoundary(
     real_t &tuy,
     real_t &tuz) noexcept
 {
-#if defined(CASE_SLOT)
-    if ((nodeType & XMIN_FACE) == XMIN_FACE)
+#if defined(CASE_RAYLEIGH_BENARD)
+    if ((nodeType & ZMIN_FACE) == ZMIN_FACE)
     {
         temp = T_HOT;
     }
-    else if ((nodeType & XMAX_FACE) == XMAX_FACE)
-    {
-        temp = T_COLD;
-    }
-    else if ((nodeType & YMIN_FACE) == YMIN_FACE)
-    {
-        temp = loadClampedTemperatureNeighbor(moments, x, y, z, 0, 1, 0);
-    }
-    else if ((nodeType & YMAX_FACE) == YMAX_FACE)
-    {
-        temp = loadClampedTemperatureNeighbor(moments, x, y, z, 0, -1, 0);
-    }
-    else if ((nodeType & ZMIN_FACE) == ZMIN_FACE)
-    {
-        temp = loadClampedTemperatureNeighbor(moments, x, y, z, 0, 0, 1);
-    }
     else if ((nodeType & ZMAX_FACE) == ZMAX_FACE)
     {
-        temp = loadClampedTemperatureNeighbor(moments, x, y, z, 0, 0, -1);
+        temp = T_COLD;
     }
     else
     {

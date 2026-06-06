@@ -25,10 +25,11 @@ static void printCaseSummary()
     std::cout << "RE: " << static_cast<double>(REYNOLDS) << std::endl;
     std::cout << "PR: " << static_cast<double>(PRANDTL) << std::endl;
 
-#if defined(CASE_SLOT)
+#if defined(CASE_RAYLEIGH_BENARD)
     std::cout << "RA: " << static_cast<double>(ActiveCase::RA) << std::endl;
     std::cout << "GBETA: " << static_cast<double>(ActiveCase::GBETA) << std::endl;
-    std::cout << "U_CHAR: " << static_cast<double>(ActiveCase::U_CHAR) << std::endl;
+    std::cout << "H: " << static_cast<double>(ActiveCase::H) << std::endl;
+    std::cout << "U_FREEFALL: " << static_cast<double>(ActiveCase::U_FREEFALL) << std::endl;
 #elif defined(CASE_JET)
     std::cout << "RI: " << static_cast<double>(ActiveCase::RI) << std::endl;
     std::cout << "GBETA: " << static_cast<double>(ActiveCase::GBETA) << std::endl;

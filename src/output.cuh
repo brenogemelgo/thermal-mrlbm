@@ -144,6 +144,7 @@ static inline void writeMetadata(
 
     out << std::boolalpha << std::setprecision(17);
     out << "caseName = " << ActiveCase::NAME << '\n';
+    out << "case_name = " << ActiveCase::NAME << '\n';
     out << "NX = " << NX << '\n';
     out << "NY = " << NY << '\n';
     out << "NZ = " << NZ << '\n';
@@ -179,34 +180,18 @@ static inline void writeMetadata(
     out << "T_REF = " << static_cast<double>(T_REF) << '\n';
     out << "GBETA = " << static_cast<double>(BETA_THERMAL) << '\n';
 
-#if defined(CASE_FOURIER)
-    out << "timeAverageEnabled = false" << '\n';
-    out << "timeAverageCount = 0" << '\n';
-    out << '\n';
-    out << "T0 = " << static_cast<double>(ActiveCase::T0) << '\n';
-    out << "AMP_T = " << static_cast<double>(ActiveCase::AMP_T) << '\n';
-    out << "UX0 = " << static_cast<double>(ActiveCase::UX0) << '\n';
-    out << "UY0 = " << static_cast<double>(ActiveCase::UY0) << '\n';
-    out << "UZ0 = " << static_cast<double>(ActiveCase::UZ0) << '\n';
-    out << "MODE_X = " << ActiveCase::MODE_X << '\n';
-    out << "MODE_Y = " << ActiveCase::MODE_Y << '\n';
-    out << "MODE_Z = " << ActiveCase::MODE_Z << '\n';
-    out << "KX = " << static_cast<double>(ActiveCase::KX) << '\n';
-    out << "KY = " << static_cast<double>(ActiveCase::KY) << '\n';
-    out << "KZ = " << static_cast<double>(ActiveCase::KZ) << '\n';
-    out << "K2 = " << static_cast<double>(ActiveCase::K2) << '\n';
-    out << "DECAY_RATE = " << static_cast<double>(ActiveCase::DECAY_RATE) << '\n';
-#elif defined(CASE_SLOT)
+#if defined(CASE_RAYLEIGH_BENARD)
     out << "timeAverageEnabled = false" << '\n';
     out << "timeAverageCount = 0" << '\n';
     out << '\n';
     out << "DELTA_T = " << static_cast<double>(ActiveCase::DELTA_T) << '\n';
-    out << "L_SLOT = " << static_cast<double>(ActiveCase::L_SLOT) << '\n';
+    out << "H = " << static_cast<double>(ActiveCase::H) << '\n';
+    out << "ASPECT_RATIO = " << static_cast<double>(ActiveCase::ASPECT_RATIO) << '\n';
+    out << "T0 = " << static_cast<double>(ActiveCase::T0) << '\n';
     out << "U_CHAR = " << static_cast<double>(ActiveCase::U_CHAR) << '\n';
-    out << "RA_TARGET = " << static_cast<double>(ActiveCase::RA_TARGET) << '\n';
-    out << "slotProfileMaxFactor = " << static_cast<double>(ActiveCase::slotProfileMaxFactor) << '\n';
-    out << "slotVelocityScale = " << static_cast<double>(ActiveCase::slotVelocityScale) << '\n';
-    out << "analyticalMaxAbsUy = " << static_cast<double>(ActiveCase::analyticalMaxAbsUy) << '\n';
+    out << "U_FREEFALL = " << static_cast<double>(ActiveCase::U_FREEFALL) << '\n';
+    out << "CONDUCTION_ONLY = " << ActiveCase::CONDUCTION_ONLY << '\n';
+    out << "PERTURBATION_AMPLITUDE = " << static_cast<double>(ActiveCase::PERTURBATION_AMPLITUDE) << '\n';
     out << "RE = " << static_cast<double>(ActiveCase::RE) << '\n';
     out << "RA = " << static_cast<double>(ActiveCase::RA) << '\n';
 #elif defined(CASE_JET)

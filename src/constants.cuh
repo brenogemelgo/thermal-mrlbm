@@ -34,23 +34,18 @@ using real_t = float;
 
 // =================================================================================================== //
 
-#if defined(CASE_FOURIER)
-#include "../cases/fourierAdvectionDiffusion.cuh"
-using ActiveCase = FourierAdvectionDiffusionCase;
-constexpr bool CASE_IS_FOURIER = true;
-constexpr bool CASE_IS_JET = false;
-#elif defined(CASE_SLOT)
-#include "../cases/verticalBuoyantSlot.cuh"
-using ActiveCase = VerticalBuoyantSlotCase;
-constexpr bool CASE_IS_FOURIER = false;
+#if defined(CASE_RAYLEIGH_BENARD)
+#include "../cases/rayleighBenard.cuh"
+using ActiveCase = RayleighBenardCase;
+constexpr bool CASE_IS_RAYLEIGH_BENARD = true;
 constexpr bool CASE_IS_JET = false;
 #elif defined(CASE_JET)
 #include "../cases/thermalJet.cuh"
 using ActiveCase = ThermalJetCase;
-constexpr bool CASE_IS_FOURIER = false;
+constexpr bool CASE_IS_RAYLEIGH_BENARD = false;
 constexpr bool CASE_IS_JET = true;
 #else
-#error "No case selected. Compile with -DCASE_FOURIER, -DCASE_SLOT, or -DCASE_JET."
+#error "No case selected. Compile with -DCASE_RAYLEIGH_BENARD or -DCASE_JET."
 #endif
 
 // =================================================================================================== //

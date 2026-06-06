@@ -4,7 +4,7 @@
 #include "deviceFunctions.cuh"
 #include "syntheticInflow.cuh"
 
-__device__ static __forceinline__ real_t caseFourierSin(
+__device__ static __forceinline__ real_t caseSin(
     const real_t value) noexcept
 {
     return sinf(value);
@@ -26,46 +26,43 @@ __device__ static __forceinline__ void initialPrimitiveFields(
     uz = static_cast<real_t>(0);
     temperature = T_COLD;
 
-#if defined(CASE_FOURIER)
-        const real_t phase =
-            ActiveCase::KX * static_cast<real_t>(x) +
-            ActiveCase::KY * static_cast<real_t>(y) +
-            ActiveCase::KZ * static_cast<real_t>(z);
+#if defined(CASE_RAYLEIGH_BENARD)
+    const real_t zNorm = ActiveCase::H > static_cast<real_t>(0)
+                             ? static_cast<real_t>(z) / ActiveCase::H
+                             : static_cast<real_t>(0);
+    temperature = T_HOT - ActiveCase::DELTA_T * zNorm;
 
-        ux = ActiveCase::UX0;
-        uy = ActiveCase::UY0;
-        uz = ActiveCase::UZ0;
-        temperature = ActiveCase::T0 + ActiveCase::AMP_T * caseFourierSin(phase);
-#elif defined(CASE_SLOT)
-        const real_t xNorm = ActiveCase::L_SLOT > static_cast<real_t>(0)
-                                 ? static_cast<real_t>(x) / ActiveCase::L_SLOT
-                                 : static_cast<real_t>(0);
-        temperature = T_HOT - ActiveCase::DELTA_T * xNorm;
+    if constexpr (!ActiveCase::CONDUCTION_ONLY)
+    {
+        const real_t xPhase = ActiveCase::TWO_PI * static_cast<real_t>(x) / static_cast<real_t>(NX);
+        const real_t zPhase = ActiveCase::PI * zNorm;
+        temperature += ActiveCase::PERTURBATION_AMPLITUDE * caseSin(xPhase) * caseSin(zPhase);
+    }
 #elif defined(CASE_JET)
-        const bool inlet = isJetInlet(x, y, z);
-        const real_t profile = inlet ? jetInletProfile(x, y) : static_cast<real_t>(0);
-        const real_t envelope = turbulentInflowEnvelope(profile);
+    const bool inlet = isJetInlet(x, y, z);
+    const real_t profile = inlet ? jetInletProfile(x, y) : static_cast<real_t>(0);
+    const real_t envelope = turbulentInflowEnvelope(profile);
 
-        uz = inlet ? smoothJetMeanUz(profile) : static_cast<real_t>(0);
+    uz = inlet ? smoothJetMeanUz(profile) : static_cast<real_t>(0);
 
-        if (inlet)
+    if (inlet)
+    {
+        real_t duX;
+        real_t duY;
+        real_t duZ;
+        syntheticTurbulentInflowVelocity(x, y, 0u, envelope, duX, duY, duZ);
+
+        ux = duX;
+        uy = duY;
+        uz += duZ;
+
+        if (uz < static_cast<real_t>(0))
         {
-            real_t duX;
-            real_t duY;
-            real_t duZ;
-            syntheticTurbulentInflowVelocity(x, y, 0u, envelope, duX, duY, duZ);
-
-            ux = duX;
-            uy = duY;
-            uz += duZ;
-
-            if (uz < static_cast<real_t>(0))
-            {
-                uz = static_cast<real_t>(0);
-            }
+            uz = static_cast<real_t>(0);
         }
+    }
 
-        temperature = inlet ? smoothJetTemperature(profile) : T_COLD;
+    temperature = inlet ? smoothJetTemperature(profile) : T_COLD;
 #endif
 }
 

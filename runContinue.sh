@@ -4,7 +4,22 @@ set -euo pipefail
 CASE_NAME="${NAME:-}"
 runId="${RUN_ID:-}"
 extra_args=()
-caseVariantDefines=()
+
+normalize_case_name() {
+    local raw_name
+    raw_name="$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')"
+    case "$raw_name" in
+        RB|RAYLEIGH|RAYLEIGH-BENARD|RAYLEIGH_BENARD)
+            printf '%s\n' "RAYLEIGH_BENARD"
+            ;;
+        JET)
+            printf '%s\n' "JET"
+            ;;
+        *)
+            printf '%s\n' "$raw_name"
+            ;;
+    esac
+}
 
 for arg in "$@"; do
     if [[ "$arg" == NAME=* ]]; then
@@ -14,8 +29,8 @@ for arg in "$@"; do
     elif [[ "$arg" == RUNID=* ]]; then
         runId="${arg#RUNID=}"
     elif [[ "$arg" != --* ]]; then
-        ARG_CASE_NAME="$(printf '%s' "$arg" | tr '[:lower:]' '[:upper:]')"
-        if [[ -z "$CASE_NAME" && ( "$ARG_CASE_NAME" == "FOURIER" || "$ARG_CASE_NAME" == "SLOT" || "$ARG_CASE_NAME" == "JET" ) ]]; then
+        ARG_CASE_NAME="$(normalize_case_name "$arg")"
+        if [[ -z "$CASE_NAME" && ( "$ARG_CASE_NAME" == "RAYLEIGH_BENARD" || "$ARG_CASE_NAME" == "JET" ) ]]; then
             CASE_NAME="$ARG_CASE_NAME"
         elif [[ -z "$runId" ]]; then
             runId="$arg"
@@ -30,21 +45,18 @@ done
 if [[ -z "$CASE_NAME" ]]; then
     CASE_NAME="JET"
 else
-    CASE_NAME="$(printf '%s' "$CASE_NAME" | tr '[:lower:]' '[:upper:]')"
+    CASE_NAME="$(normalize_case_name "$CASE_NAME")"
 fi
 
 case "$CASE_NAME" in
-    FOURIER)
-        CASE_DEFINE="-DCASE_FOURIER"
-        ;;
-    SLOT)
-        CASE_DEFINE="-DCASE_SLOT"
+    RAYLEIGH_BENARD)
+        CASE_DEFINE="-DCASE_RAYLEIGH_BENARD"
         ;;
     JET)
         CASE_DEFINE="-DCASE_JET"
         ;;
     *)
-        echo "Unknown NAME=$CASE_NAME. Use NAME=FOURIER, NAME=SLOT, or NAME=JET." >&2
+        echo "Unknown NAME=$CASE_NAME. Use NAME=RAYLEIGH_BENARD or NAME=JET." >&2
         exit 1
         ;;
 esac
@@ -62,17 +74,8 @@ if [[ -z "$runId" || "$runId" == "." || "$runId" == ".." || "$runId" == *"/"* ||
     exit 1
 fi
 
-if [[ "$CASE_NAME" == "FOURIER" && "$runId" =~ ^[0-9]+$ ]]; then
-    fourierMesh="$((10#$runId))"
-    case "$fourierMesh" in
-        32|64|128|256)
-            caseVariantDefines+=("-DFOURIER_MESH=${fourierMesh}")
-            ;;
-    esac
-fi
-
 mkdir -p "output/${case_lower}/${runId}"
 rm -f mrlbm
 
-nvcc -std=c++20 -O3 --restrict --expt-relaxed-constexpr --fmad=true --extra-device-vectorization --extended-lambda -arch=sm_86 -lineinfo -Xptxas -v "${CASE_DEFINE}" "${caseVariantDefines[@]}" src/main.cu -o mrlbm
+nvcc -std=c++20 -O3 --restrict --expt-relaxed-constexpr --fmad=true --extra-device-vectorization --extended-lambda -arch=sm_86 -lineinfo -Xptxas -v "${CASE_DEFINE}" src/main.cu -o mrlbm
 ./mrlbm --runId "$runId" "${extra_args[@]}" --continue

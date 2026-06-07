@@ -8,13 +8,13 @@ struct RayleighBenardCase
 
     static constexpr natural_t NX = 256;
     static constexpr natural_t NY = 256;
-    static constexpr natural_t NZ = 256;
+    static constexpr natural_t NZ = 128;
 
-    static constexpr natural_t NSTEPS = 100000;
+    static constexpr natural_t NSTEPS = 50000;
     static constexpr natural_t STAMP = 1000;
 
     // 0: pure conduction; 1e4, 1e5, 1e6: convection
-    static constexpr real_t RA = static_cast<real_t>(1e6);
+    static constexpr real_t RA = static_cast<real_t>(1e5);
     static constexpr real_t PR = static_cast<real_t>(0.71);
 
     static constexpr real_t THOT = static_cast<real_t>(1);

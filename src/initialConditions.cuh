@@ -1,13 +1,13 @@
 #pragma once
 
-#include "D3Q7.cuh"
+#include "reconstruction.cuh"
 #include "deviceFunctions.cuh"
 #include "syntheticInflow.cuh"
 
 __device__ static __forceinline__ real_t caseSin(
     const real_t value) noexcept
 {
-    return sinf(value);
+    return sin(value);
 }
 
 __device__ static __forceinline__ void initialPrimitiveFields(
@@ -35,8 +35,14 @@ __device__ static __forceinline__ void initialPrimitiveFields(
     if constexpr (!ActiveCase::CONDUCTION_ONLY)
     {
         const real_t xPhase = ActiveCase::TWO_PI * static_cast<real_t>(x) / static_cast<real_t>(NX);
+        const real_t yPhase = ActiveCase::TWO_PI * static_cast<real_t>(y) / static_cast<real_t>(NY);
         const real_t zPhase = ActiveCase::PI * zNorm;
-        temperature += ActiveCase::PERTURBATION_AMPLITUDE * caseSin(xPhase) * caseSin(zPhase);
+
+        const real_t perturb =
+            caseSin(zPhase) *
+            (caseSin(xPhase) + caseSin(yPhase) + static_cast<real_t>(0.5) * caseSin(xPhase + yPhase));
+
+        temperature += ActiveCase::PERTURBATION_AMPLITUDE * perturb;
     }
 #elif defined(CASE_JET)
     const bool inlet = isJetInlet(x, y, z);
@@ -87,25 +93,25 @@ __global__ void initializeCase(
     real_t temperature;
     initialPrimitiveFields(x, y, z, rho, uxRaw, uyRaw, uzRaw, temperature);
 
-    const real_t uxCoeff = uxRaw * VelocitySet::scaleI();
-    const real_t uyCoeff = uyRaw * VelocitySet::scaleI();
-    const real_t uzCoeff = uzRaw * VelocitySet::scaleI();
-    const real_t invThermalCs2 = ThermalVelocitySet::as2();
-
-    moments[midx(idx, RHO)] = rho;
-    moments[midx(idx, UX)] = uxCoeff;
-    moments[midx(idx, UY)] = uyCoeff;
-    moments[midx(idx, UZ)] = uzCoeff;
-    moments[midx(idx, MXX)] = static_cast<real_t>(0.5) * uxCoeff * uxCoeff;
-    moments[midx(idx, MYY)] = static_cast<real_t>(0.5) * uyCoeff * uyCoeff;
-    moments[midx(idx, MZZ)] = static_cast<real_t>(0.5) * uzCoeff * uzCoeff;
-    moments[midx(idx, MXY)] = uxCoeff * uyCoeff;
-    moments[midx(idx, MXZ)] = uxCoeff * uzCoeff;
-    moments[midx(idx, MYZ)] = uyCoeff * uzCoeff;
-    moments[midx(idx, TEMP)] = temperature;
-    moments[midx(idx, TUX)] = temperature * uxRaw * invThermalCs2;
-    moments[midx(idx, TUY)] = temperature * uyRaw * invThermalCs2;
-    moments[midx(idx, TUZ)] = temperature * uzRaw * invThermalCs2;
+    const real_t u[3] = {uxRaw, uyRaw, uzRaw};
+    real_t a[3]; acceleration(temperature, boundaryMask(x,y,z)==BULK, a);
+    moments[midx(idx,RHO)] = rho;
+    moments[midx(idx,TEMP)] = temperature;
+    for(int d=0; d<3; ++d)
+    {
+        moments[midx(idx,UX+d)] = u[d]+a[d]/2;
+        moments[midx(idx,TUX+d)] = temperature*u[d];
+    }
+    for(int d=0; d<6; ++d)
+    {
+        const int i=d<3 ? d : d==3 || d==4 ? 0 : 1;
+        const int j=d<3 ? d : d==3 ? 1 : 2;
+        moments[midx(idx,PXX+d)] = -a[i]*a[j]/4;
+    }
+#if defined(CASE_RAYLEIGH_BENARD)
+    // Exact post-collision conductive flux for a linear temperature field.
+    moments[midx(idx,TUZ)] = (TAU_THERMAL-1)*ThermalVelocitySet::cs2()*ActiveCase::DELTA_T/ActiveCase::H;
+#endif
 
     for (natural_t k = 0; k < NUM_MOMENTS; ++k)
     {

@@ -1,276 +1,93 @@
 #pragma once
-
-#include "deviceFunctions.cuh"
+#include "reconstruction.cuh"
 #include "boundary/deviceRuntime.cuh"
 
 template <natural_t Q>
-__device__ static __forceinline__ void accumulateDirection(
-    const real_t *__restrict__ moments,
-    const natural_t x,
-    const natural_t y,
-    const natural_t z,
-    real_t &rho,
-    real_t &ux,
-    real_t &uy,
-    real_t &uz,
-    real_t &mxx,
-    real_t &myy,
-    real_t &mzz,
-    real_t &mxy,
-    real_t &mxz,
-    real_t &myz,
-    real_t &temp,
-    real_t &tux,
-    real_t &tuy,
-    real_t &tuz) noexcept
+__device__ inline void accumulateDirection(const real_t *m, natural_t x, natural_t y, natural_t z,
+                                           HydroState &s, real_t &t, real_t (&j)[3])
 {
-    constexpr int cx = VelocitySet::cx<Q>();
-    constexpr int cy = VelocitySet::cy<Q>();
-    constexpr int cz = VelocitySet::cz<Q>();
-
-    const natural_t src = jetPullNeighborIndex(x, y, z, cx, cy, cz);
-
-    real_t cu = static_cast<real_t>(0);
-
-    if constexpr (cx != 0)
-    {
-        cu += static_cast<real_t>(cx) * loadMoment(moments, src, UX);
-    }
-
-    if constexpr (cy != 0)
-    {
-        cu += static_cast<real_t>(cy) * loadMoment(moments, src, UY);
-    }
-
-    if constexpr (cz != 0)
-    {
-        cu += static_cast<real_t>(cz) * loadMoment(moments, src, UZ);
-    }
-
-    real_t mh = loadMoment(moments, src, MXX) * VelocitySet::hxx<Q>() +
-                loadMoment(moments, src, MYY) * VelocitySet::hyy<Q>() +
-                loadMoment(moments, src, MZZ) * VelocitySet::hzz<Q>();
-
-    if constexpr (cx * cy != 0)
-    {
-        mh += loadMoment(moments, src, MXY) * VelocitySet::hxy<Q>();
-    }
-
-    if constexpr (cx * cz != 0)
-    {
-        mh += loadMoment(moments, src, MXZ) * VelocitySet::hxz<Q>();
-    }
-
-    if constexpr (cy * cz != 0)
-    {
-        mh += loadMoment(moments, src, MYZ) * VelocitySet::hyz<Q>();
-    }
-
-    const real_t wrho = VelocitySet::w<Q>() * loadMoment(moments, src, RHO);
-    const real_t fi = fma_rn(wrho, cu + mh, wrho);
-
-    rho += fi;
-
-    if constexpr (cx != 0)
-    {
-        ux += fi * static_cast<real_t>(cx);
-        mxx += fi;
-    }
-
-    if constexpr (cy != 0)
-    {
-        uy += fi * static_cast<real_t>(cy);
-        myy += fi;
-    }
-
-    if constexpr (cz != 0)
-    {
-        uz += fi * static_cast<real_t>(cz);
-        mzz += fi;
-    }
-
-    if constexpr (cx * cy != 0)
-    {
-        mxy += fi * static_cast<real_t>(cx * cy);
-    }
-
-    if constexpr (cx * cz != 0)
-    {
-        mxz += fi * static_cast<real_t>(cx * cz);
-    }
-
-    if constexpr (cy * cz != 0)
-    {
-        myz += fi * static_cast<real_t>(cy * cz);
-    }
-
-    const real_t sourceTemperature = loadMoment(moments, src, TEMP);
-
-    real_t cuT = static_cast<real_t>(0);
-
-    if constexpr (cx != 0)
-    {
-        cuT += static_cast<real_t>(cx) * loadMoment(moments, src, TUX);
-    }
-
-    if constexpr (cy != 0)
-    {
-        cuT += static_cast<real_t>(cy) * loadMoment(moments, src, TUY);
-    }
-
-    if constexpr (cz != 0)
-    {
-        cuT += static_cast<real_t>(cz) * loadMoment(moments, src, TUZ);
-    }
-
-    const real_t gi = VelocitySet::w<Q>() * (sourceTemperature + cuT);
-
-    temp += gi;
-
-    if constexpr (cx != 0)
-    {
-        tux += gi * static_cast<real_t>(cx);
-    }
-
-    if constexpr (cy != 0)
-    {
-        tuy += gi * static_cast<real_t>(cy);
-    }
-
-    if constexpr (cz != 0)
-    {
-        tuz += gi * static_cast<real_t>(cz);
-    }
+    constexpr int cx=VelocitySet::cx<Q>(), cy=VelocitySet::cy<Q>(), cz=VelocitySet::cz<Q>();
+    const natural_t n=jetPullNeighborIndex(x,y,z,cx,cy,cz);
+    const HydroState src=loadHydro(m,n);
+    const natural_t sz=n/STRIDE;
+    real_t a[3]; acceleration(loadMoment(m,n,TEMP),sz>0 && sz<NZ-1,a);
+    const real_t f=hydroPopulation<Q>(src,a);
+    s.rho += f;
+    s.v[0] += cx*f; s.v[1] += cy*f; s.v[2] += cz*f;
+    s.p[0] += VelocitySet::hxx<Q>()*f;
+    s.p[1] += VelocitySet::hyy<Q>()*f;
+    s.p[2] += VelocitySet::hzz<Q>()*f;
+    s.p[3] += cx*cy*f; s.p[4] += cx*cz*f; s.p[5] += cy*cz*f;
+    const real_t js[3]={loadMoment(m,n,TUX),loadMoment(m,n,TUY),loadMoment(m,n,TUZ)};
+    const real_t g=thermalPopulation<Q>(loadMoment(m,n,TEMP),js);
+    t += g; j[0] += cx*g; j[1] += cy*g; j[2] += cz*g;
 }
 
-__global__ void streamCollide(
-    const real_t *__restrict__ moments,
-    real_t *__restrict__ dbuffer,
-    const natural_t step)
+__global__ void streamCollide(const real_t *__restrict__ moments, real_t *__restrict__ dbuffer,
+                              const natural_t step)
 {
-    const natural_t x = blockIdx.x * BLOCK_NX + threadIdx.x;
-    const natural_t y = blockIdx.y * BLOCK_NY + threadIdx.y;
-    const natural_t z = blockIdx.z * BLOCK_NZ + threadIdx.z;
-
-    if (x >= NX || y >= NY || z >= NZ)
+    const natural_t x=blockIdx.x*BLOCK_NX+threadIdx.x;
+    const natural_t y=blockIdx.y*BLOCK_NY+threadIdx.y;
+    const natural_t z=blockIdx.z*BLOCK_NZ+threadIdx.z;
+    if (x>=NX || y>=NY || z>=NZ) return;
+    const natural_t idx=global3(x,y,z);
+    const uint8_t type=boundaryMask(x,y,z);
+#if defined(CASE_RAYLEIGH_BENARD)
+    if (type!=BULK) return; // filled by applyNEEPlates after bulk collision
+#endif
+    HydroState s{};
+    real_t t=0, j[3]={};
+#if defined(CASE_JET)
+    if (type!=BULK)
     {
-        return;
-    }
-
-    const natural_t idx = global3(x, y, z);
-    const uint8_t nodeType = boundaryMask(x, y, z);
-
-    real_t rho = static_cast<real_t>(0);
-    real_t ux = static_cast<real_t>(0);
-    real_t uy = static_cast<real_t>(0);
-    real_t uz = static_cast<real_t>(0);
-    real_t mxx = static_cast<real_t>(0);
-    real_t myy = static_cast<real_t>(0);
-    real_t mzz = static_cast<real_t>(0);
-    real_t mxy = static_cast<real_t>(0);
-    real_t mxz = static_cast<real_t>(0);
-    real_t myz = static_cast<real_t>(0);
-    real_t temp = static_cast<real_t>(0);
-    real_t tux = static_cast<real_t>(0);
-    real_t tuy = static_cast<real_t>(0);
-    real_t tuz = static_cast<real_t>(0);
-
-    if (nodeType != BULK)
-    {
-        dispatchIRBCBoundary(
-            moments,
-            x, y, z,
-            step,
-            nodeType,
-            rho, ux, uy, uz,
-            mxx, myy, mzz, mxy, mxz, myz,
-            temp, tux, tuy, tuz);
+        dispatchIRBCBoundary(moments,x,y,z,step,type,s.rho,s.v[0],s.v[1],s.v[2],
+            s.p[0],s.p[1],s.p[2],s.p[3],s.p[4],s.p[5],t,j[0],j[1],j[2]);
+        // Legacy jet dispatcher returns A2/rho, without the isotropic cs2.
     }
     else
+#endif
     {
-        constexpr_for<0, VelocitySet::Q()>(
-            [&](const auto Q) noexcept
-            {
-                accumulateDirection<Q>(
-                    moments,
-                    x, y, z,
-                    rho, ux, uy, uz,
-                    mxx, myy, mzz, mxy, mxz, myz,
-                    temp, tux, tuy, tuz);
-            });
-
-        const real_t invRho = static_cast<real_t>(1) / rho;
-
-        ux *= invRho;
-        uy *= invRho;
-        uz *= invRho;
-        mxx = fma_rn(mxx, invRho, -VelocitySet::cs2());
-        myy = fma_rn(myy, invRho, -VelocitySet::cs2());
-        mzz = fma_rn(mzz, invRho, -VelocitySet::cs2());
-        mxy *= invRho;
-        mxz *= invRho;
-        myz *= invRho;
+        constexpr_for<0,VelocitySet::Q()>([&](auto q) {
+            accumulateDirection<q>(moments,x,y,z,s,t,j);
+        });
+        const real_t inv=1/s.rho;
+#pragma unroll
+        for (int d=0;d<3;++d) s.v[d]*=inv;
+#pragma unroll
+        for (int d=0;d<6;++d) s.p[d]*=inv;
     }
-
-    const real_t invRho = static_cast<real_t>(1) / rho;
-
-    ux *= VelocitySet::scaleI();
-    uy *= VelocitySet::scaleI();
-    uz *= VelocitySet::scaleI();
-    mxx *= VelocitySet::scaleII();
-    myy *= VelocitySet::scaleII();
-    mzz *= VelocitySet::scaleII();
-    mxy *= VelocitySet::scaleIJ();
-    mxz *= VelocitySet::scaleIJ();
-    myz *= VelocitySet::scaleIJ();
-    tux *= VelocitySet::scaleI();
-    tuy *= VelocitySet::scaleI();
-    tuz *= VelocitySet::scaleI();
-
-    const real_t buoyancy = (ENABLE_BUOYANCY && nodeType == BULK) ? BETA_THERMAL * (temp - T_REF) : static_cast<real_t>(0);
-    const real_t forceX = buoyancy * THERMAL_GRAVITY_X;
-    const real_t forceY = buoyancy * THERMAL_GRAVITY_Y;
-    const real_t forceZ = buoyancy * THERMAL_GRAVITY_Z;
-
-    const real_t spongeRamp = topSpongeRamp(z);
-    const real_t omegaShear = spongeRamp > static_cast<real_t>(0)
-                                   ? static_cast<real_t>(1) / (TAU_SHEAR + spongeRamp * (TAU_SHEAR_SPONGE_MAX - TAU_SHEAR))
-                                   : OMEGA_SHEAR;
-    const real_t omegaBulk = spongeRamp > static_cast<real_t>(0)
-                                  ? static_cast<real_t>(1) / (TAU_BULK + spongeRamp * (TAU_BULK_SPONGE_MAX - TAU_BULK))
-                                  : OMEGA_BULK;
-    const real_t omegaThermal = spongeRamp > static_cast<real_t>(0)
-                                     ? static_cast<real_t>(1) / (TAU_THERMAL + spongeRamp * (TAU_THERMAL_SPONGE_MAX - TAU_THERMAL))
-                                     : OMEGA_THERMAL;
-    const real_t tOmegaShear = static_cast<real_t>(1) - omegaShear;
-    const real_t tOmegaBulk = static_cast<real_t>(1) - omegaBulk;
-    const real_t tOmegaThermal = static_cast<real_t>(1) - omegaThermal;
-    const real_t ttOmegaShear = static_cast<real_t>(1) - static_cast<real_t>(0.5) * omegaShear;
-
-    const real_t uxEq = ux + static_cast<real_t>(1.5) * invRho * forceX;
-    const real_t uyEq = uy + static_cast<real_t>(1.5) * invRho * forceY;
-    const real_t uzEq = uz + static_cast<real_t>(1.5) * invRho * forceZ;
-
-    const real_t trace = mxx + myy + mzz;
-    const real_t traceEq = static_cast<real_t>(0.5) * (uxEq * uxEq + uyEq * uyEq + uzEq * uzEq);
-    const real_t traceThird = VelocitySet::cs2() * trace;
-    const real_t traceEqThird = VelocitySet::cs2() * traceEq;
-    const real_t tracePostThird = VelocitySet::cs2() * (tOmegaBulk * trace + omegaBulk * traceEq);
-
-    const real_t sourceScale = ttOmegaShear * VelocitySet::scaleI() * invRho;
-
-    dbuffer[midx(idx, RHO)] = rho;
-    dbuffer[midx(idx, UX)] = ux + VelocitySet::scaleI() * invRho * forceX;
-    dbuffer[midx(idx, UY)] = uy + VelocitySet::scaleI() * invRho * forceY;
-    dbuffer[midx(idx, UZ)] = uz + VelocitySet::scaleI() * invRho * forceZ;
-    dbuffer[midx(idx, MXX)] = tOmegaShear * (mxx - traceThird) + omegaShear * (static_cast<real_t>(0.5) * uxEq * uxEq - traceEqThird) + tracePostThird + sourceScale * forceX * uxEq;
-    dbuffer[midx(idx, MYY)] = tOmegaShear * (myy - traceThird) + omegaShear * (static_cast<real_t>(0.5) * uyEq * uyEq - traceEqThird) + tracePostThird + sourceScale * forceY * uyEq;
-    dbuffer[midx(idx, MZZ)] = tOmegaShear * (mzz - traceThird) + omegaShear * (static_cast<real_t>(0.5) * uzEq * uzEq - traceEqThird) + tracePostThird + sourceScale * forceZ * uzEq;
-    dbuffer[midx(idx, MXY)] = tOmegaShear * mxy + omegaShear * uxEq * uyEq + sourceScale * (forceX * uyEq + forceY * uxEq);
-    dbuffer[midx(idx, MXZ)] = tOmegaShear * mxz + omegaShear * uxEq * uzEq + sourceScale * (forceX * uzEq + forceZ * uxEq);
-    dbuffer[midx(idx, MYZ)] = tOmegaShear * myz + omegaShear * uyEq * uzEq + sourceScale * (forceY * uzEq + forceZ * uyEq);
-    dbuffer[midx(idx, TEMP)] = temp + THERMAL_SOURCE_VALUE;
-    dbuffer[midx(idx, TUX)] = tOmegaThermal * tux + omegaThermal * temp * uxEq + THERMAL_SOURCE_VALUE * uxEq;
-    dbuffer[midx(idx, TUY)] = tOmegaThermal * tuy + omegaThermal * temp * uyEq + THERMAL_SOURCE_VALUE * uyEq;
-    dbuffer[midx(idx, TUZ)] = tOmegaThermal * tuz + omegaThermal * temp * uzEq + THERMAL_SOURCE_VALUE * uzEq;
+    s.p[0]-=s.v[0]*s.v[0]; s.p[1]-=s.v[1]*s.v[1]; s.p[2]-=s.v[2]*s.v[2];
+    s.p[3]-=s.v[0]*s.v[1]; s.p[4]-=s.v[0]*s.v[2]; s.p[5]-=s.v[1]*s.v[2];
+    real_t a[3]; acceleration(t,type==BULK,a);
+    const real_t ramp=topSpongeRamp(z);
+    const real_t ws=1/(TAU_SHEAR+ramp*(TAU_SHEAR_SPONGE_MAX-TAU_SHEAR));
+    const real_t wb=1/(TAU_BULK+ramp*(TAU_BULK_SPONGE_MAX-TAU_BULK));
+    const real_t wt=1/(TAU_THERMAL+ramp*(TAU_THERMAL_SPONGE_MAX-TAU_THERMAL));
+    const real_t u[3]={s.v[0]+a[0]/2,s.v[1]+a[1]/2,s.v[2]+a[2]/2};
+    s=collideHydro(s,a,ws,wb);
+    dbuffer[midx(idx,RHO)]=s.rho;
+#pragma unroll
+    for(int d=0;d<3;++d)
+    {
+        dbuffer[midx(idx,UX+d)]=s.v[d];
+        dbuffer[midx(idx,TUX+d)]=(1-wt)*j[d]+wt*t*u[d]+THERMAL_SOURCE_VALUE*u[d];
+    }
+#pragma unroll
+    for(int d=0;d<6;++d) dbuffer[midx(idx,PXX+d)]=s.p[d];
+    dbuffer[midx(idx,TEMP)]=t+THERMAL_SOURCE_VALUE;
 }
+
+#if defined(CASE_JET)
+__global__ void accumulateThermalTimeAverage(const real_t *m, double *ta, double *ua)
+{
+    const natural_t i=blockIdx.x*blockDim.x+threadIdx.x;
+    if(i>=CELLS) return;
+    real_t a[3]; acceleration(m[midx(i,TEMP)], i/STRIDE>0 && i/STRIDE<NZ-1,a);
+    ta[i]+=m[midx(i,TEMP)]; ua[i]+=m[midx(i,UZ)]-a[2]/2;
+}
+__global__ void finalizeThermalTimeAverage(const double *ta,const double *ua,real_t *tm,real_t *um,uint64_t n)
+{
+    const natural_t i=blockIdx.x*blockDim.x+threadIdx.x;
+    if(i<CELLS) {tm[i]=ta[i]/n; um[i]=ua[i]/n;}
+}
+#endif

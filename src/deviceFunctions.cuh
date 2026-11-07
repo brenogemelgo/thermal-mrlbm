@@ -102,19 +102,19 @@ struct IntegralConstant
     using value_type = T;
     using type = IntegralConstant;
 
-    __device__ [[nodiscard]] inline consteval operator value_type() const noexcept
+    __device__ __host__ [[nodiscard]] inline consteval operator value_type() const noexcept
     {
         return value;
     }
 
-    __device__ [[nodiscard]] inline consteval value_type operator()() const noexcept
+    __device__ __host__ [[nodiscard]] inline consteval value_type operator()() const noexcept
     {
         return value;
     }
 };
 
 template <const natural_t Start, const natural_t End, typename F>
-__device__ __forceinline__ constexpr void constexpr_for(F &&f) noexcept
+__device__ __host__ __forceinline__ constexpr void constexpr_for(F &&f) noexcept
 {
     if constexpr (Start < End)
     {

@@ -3,8 +3,7 @@ Shared post-processing helpers for thermal-mrlbm.
 
 Run the case scripts from the repository root:
 
-    python postRayleighBenard.py
-    python postJet.py
+    python3 postRayleigh.py all output/rayleigh_benard/RUN_ID
 
 Array convention:
     Binary fields use CUDA indexing idx = x + y * NX + z * NX * NY.
@@ -23,12 +22,12 @@ momentNames = [
     "ux",
     "uy",
     "uz",
-    "mxx",
-    "myy",
-    "mzz",
-    "mxy",
-    "mxz",
-    "myz",
+    "pxx",
+    "pyy",
+    "pzz",
+    "pxy",
+    "pxz",
+    "pyz",
     "temperature",
     "thermalFluxX",
     "thermalFluxY",
@@ -256,7 +255,8 @@ def readPackedField(runDir, metadata, fieldName, stepValue):
 
     binaryPath = getStepBinaryPath(runDir, stepValue)
     expectedSize = getExpectedSize(metadata)
-    valueBytes = np.dtype(np.float32).itemsize
+    dtype = np.float64 if metadata.get("real_bytes", 4) == 8 else np.float32
+    valueBytes = np.dtype(dtype).itemsize
     expectedBytes = expectedSize * len(momentNames) * valueBytes
     actualBytes = binaryPath.stat().st_size
 
@@ -266,14 +266,17 @@ def readPackedField(runDir, metadata, fieldName, stepValue):
     fieldIndex = momentNames.index(canonicalName)
     with binaryPath.open("rb") as inputFile:
         inputFile.seek(fieldIndex * expectedSize * valueBytes)
-        rawValues = np.fromfile(inputFile, dtype=np.float32, count=expectedSize)
+        rawValues = np.fromfile(inputFile, dtype=dtype, count=expectedSize)
 
-    arrZyx = reshapeZyx(rawValues, metadata)
-    if canonicalName in velocityFields:
-        velocityScaleI = getFloat(metadata, "velocityScaleI", 3.0)
-        arrZyx = arrZyx / velocityScaleI
-
-    return arrZyx
+    field = reshapeZyx(rawValues, metadata)
+    if canonicalName in velocityFields and metadata.get("moment_format") == "neq_post_v2":
+        temperature = readPackedField(runDir, metadata, "temperature", stepValue)
+        axis = {"ux": "X", "uy": "Y", "uz": "Z"}[canonicalName]
+        acceleration = getFloat(metadata, "GBETA") * getFloat(metadata, f"GRAVITY_{axis}") * (
+            temperature - getFloat(metadata, "T_REF"))
+        acceleration[[0, -1], :, :] = 0
+        field = field - 0.5 * acceleration
+    return field
 
 
 def readScalarField(runDir, metadata, fieldName, selectedStep=None):
@@ -299,13 +302,14 @@ def tryReadStandaloneScalarField(runDir, metadata, fieldName):
         return None
 
     expectedSize = getExpectedSize(metadata)
-    expectedBytes = expectedSize * np.dtype(np.float32).itemsize
+    dtype = np.float64 if metadata.get("real_bytes", 4) == 8 else np.float32
+    expectedBytes = expectedSize * np.dtype(dtype).itemsize
     actualBytes = binaryPath.stat().st_size
 
     if actualBytes != expectedBytes:
         raise RuntimeError(f"Binary size mismatch for {binaryPath}: got {actualBytes} bytes, expected {expectedBytes}")
 
-    rawValues = np.fromfile(binaryPath, dtype=np.float32, count=expectedSize)
+    rawValues = np.fromfile(binaryPath, dtype=dtype, count=expectedSize)
     return reshapeZyx(rawValues, metadata)
 
 

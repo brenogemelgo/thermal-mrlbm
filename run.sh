@@ -74,9 +74,9 @@ if [[ -z "$runId" || "$runId" == "." || "$runId" == ".." || "$runId" == *"/"* ||
     exit 1
 fi
 
-rm -rf "output/${case_lower}/${runId}"
 mkdir -p "output/${case_lower}/${runId}"
-rm -f mrlbm
+mkdir -p build
+read -r -a extra_nvcc_flags <<< "${NVCC_FLAGS:-}"
 
-nvcc -std=c++20 -O3 --restrict --expt-relaxed-constexpr --fmad=true --extra-device-vectorization --extended-lambda -arch=sm_86 -lineinfo -Xptxas -v "${CASE_DEFINE}" src/main.cu -o mrlbm
-./mrlbm --runId "$runId" "${extra_args[@]}"
+nvcc -std=c++20 -O3 --restrict --expt-relaxed-constexpr --fmad=true --extra-device-vectorization --extended-lambda -arch="${CUDA_ARCH:-sm_86}" -lineinfo -Xptxas -v "${CASE_DEFINE}" "${extra_nvcc_flags[@]}" src/main.cu -o "build/${case_lower}"
+"./build/${case_lower}" --runId "$runId" "${extra_args[@]}"

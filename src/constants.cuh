@@ -30,7 +30,17 @@ struct D3Q27;
 using VelocitySet = D3Q27;
 using ThermalVelocitySet = D3Q27;
 using natural_t = uint32_t;
+#if defined(MRL_DOUBLE_PRECISION)
+using real_t = double;
+#else
 using real_t = float;
+#endif
+
+#ifndef REGULARIZATION_ORDER
+#define REGULARIZATION_ORDER 3
+#endif
+constexpr int RR_ORDER = REGULARIZATION_ORDER;
+static_assert(RR_ORDER == 2 || RR_ORDER == 3, "Select RR2 or RR3");
 
 // =================================================================================================== //
 
@@ -171,15 +181,20 @@ constexpr natural_t RHO = 0;
 constexpr natural_t UX = 1;
 constexpr natural_t UY = 2;
 constexpr natural_t UZ = 3;
-constexpr natural_t MXX = 4;
-constexpr natural_t MYY = 5;
-constexpr natural_t MZZ = 6;
-constexpr natural_t MXY = 7;
-constexpr natural_t MXZ = 8;
-constexpr natural_t MYZ = 9;
+constexpr natural_t PXX = 4;
+constexpr natural_t PYY = 5;
+constexpr natural_t PZZ = 6;
+constexpr natural_t PXY = 7;
+constexpr natural_t PXZ = 8;
+constexpr natural_t PYZ = 9;
 constexpr natural_t TEMP = 10;
 constexpr natural_t TUX = 11;
 constexpr natural_t TUY = 12;
 constexpr natural_t TUZ = 13;
+
+// UX/UY/UZ = post-collision population momentum / rho, v = u + a/2.
+// Pij = A2_post/rho - vi*vj (unscaled non-equilibrium Hermite stress).
+// TUi = post-collision thermal first moment (unscaled).
+// The fourteen-field SoA layout is identical for RR2 and RR3.
 
 // =================================================================================================== //

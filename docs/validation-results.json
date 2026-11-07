@@ -1,0 +1,43 @@
+{
+  "work": "/tmp/thermal-rbc-final-validation-v2",
+  "tests": {
+    "all_12_parameter_sets": "PASS",
+    "nee_diffusion": {
+      "errors": [
+        0.000168506,
+        2.18649e-05,
+        2.7725e-06
+      ],
+      "wall_flux_errors": [
+        0.000370843,
+        1.82585e-05,
+        4.51362e-06
+      ],
+      "observed_orders": [
+        2.7685624622294074,
+        2.8896989955992796
+      ],
+      "shear_errors": [
+        3.34503e-05,
+        4.5013e-06,
+        5.83055e-07
+      ],
+      "shear_observed_orders": [
+        2.719220966729971,
+        2.8599038947673683
+      ]
+    },
+    "conduction_all_five_nu_and_rr_limits": "PASS (<3e-5)",
+    "restart_bitwise_and_series_rollback": "PASS",
+    "short_buoyant_case_specializations": "PASS (not DNS validation)",
+    "plots_and_correlation_aware_reports": "PASS",
+    "jet_compile": "PASS",
+    "cuda_memcheck": "PASS (0 errors)",
+    "cuda_racecheck": "PASS (0 errors, 0 warnings)",
+    "launcher_build_run_continue": "PASS",
+    "binary_vti_physical_velocity_reader": "PASS",
+    "kooij_reference_report": "PASS (comparison tooling only)",
+    "postRayleigh_entry_point": "PASS (22 PNG/PDF outputs across three existing short runs)",
+    "legacy_plot_entry_point": "PASS (CLI and import compatibility)"
+  }
+}

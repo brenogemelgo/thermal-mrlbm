@@ -132,18 +132,4 @@ struct D3Q27
         return static_cast<real_t>(cy<dir>() * cz<dir>());
     }
 
-    __device__ __host__ [[nodiscard]] static __forceinline__ consteval real_t scaleI() noexcept
-    {
-        return as2();
-    }
-
-    __device__ __host__ [[nodiscard]] static __forceinline__ consteval real_t scaleII() noexcept
-    {
-        return static_cast<real_t>(0.5) * as2() * as2();
-    }
-
-    __device__ __host__ [[nodiscard]] static __forceinline__ consteval real_t scaleIJ() noexcept
-    {
-        return as2() * as2();
-    }
 };

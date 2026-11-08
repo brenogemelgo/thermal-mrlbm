@@ -9,7 +9,7 @@
 // f*_b = feq_b + (f*_1 - feq_1 - S_1/2), projected to second order.
 // g*_b = geq_b + (g*_1 - geq_1). All directions use the same adjacent node.
 // Reading freshly updated interior moments avoids a time-lagged wall condition.
-__global__ void applyNEEPlates(real_t *m)
+__global__ void applyNEEPlates(real_t *m,natural_t step=0)
 {
     const natural_t x = blockIdx.x*blockDim.x+threadIdx.x;
     const natural_t y = blockIdx.y*blockDim.y+threadIdx.y;
@@ -18,7 +18,7 @@ __global__ void applyNEEPlates(real_t *m)
     const natural_t b = global3(x,y,z), n = global3(x,y,z==0 ? 1 : NZ-2);
     const HydroState s = loadHydro(m,n);
     const real_t t = loadMoment(m,n,TEMP);
-    real_t a[3]; acceleration(t,true,a);
+    real_t a[3]; nodeAcceleration(t,x,y,z==0 ? 1 : NZ-2,step,a);
     m[midx(b,RHO)] = s.rho;
 #pragma unroll
     for (int d=0; d<3; ++d)

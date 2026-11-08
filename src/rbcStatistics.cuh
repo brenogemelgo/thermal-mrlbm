@@ -13,28 +13,28 @@ constexpr int THREADS=256;
 constexpr natural_t TILES=(STRIDE+THREADS-1)/THREADS;
 constexpr size_t PROFILE_SIZE=NS*NZ;
 
-__device__ inline double primitive(const real_t *m,int x,int y,int z,int f)
+__device__ inline double primitive(const real_t *m,int x,int y,int z,int f,natural_t step=0)
 {
     x=(x+NX)%NX; y=(y+NY)%NY;
     const natural_t i=global3(x,y,z);
     double value=loadMoment(m,i,f);
     if(f>=UX && f<=UZ)
     {
-        real_t a[3]; acceleration(loadMoment(m,i,TEMP),z>0 && z<int(NZ)-1,a);
+        real_t a[3]; nodeAcceleration(loadMoment(m,i,TEMP),x,y,z,step,a);
         value-=double(a[f-UX])/2;
     }
     return value;
 }
-__device__ inline double derivative(const real_t *m,int x,int y,int z,int f,int axis)
+__device__ inline double derivative(const real_t *m,int x,int y,int z,int f,int axis,natural_t step=0)
 {
-    if(axis==0) return (primitive(m,x+1,y,z,f)-primitive(m,x-1,y,z,f))/2;
-    if(axis==1) return (primitive(m,x,y+1,z,f)-primitive(m,x,y-1,z,f))/2;
-    if(z==0) return (-3*primitive(m,x,y,z,f)+4*primitive(m,x,y,1,f)-primitive(m,x,y,2,f))/2;
-    if(z==NZ-1) return (3*primitive(m,x,y,z,f)-4*primitive(m,x,y,z-1,f)+primitive(m,x,y,z-2,f))/2;
-    return (primitive(m,x,y,z+1,f)-primitive(m,x,y,z-1,f))/2;
+    if(axis==0) return (primitive(m,x+1,y,z,f,step)-primitive(m,x-1,y,z,f,step))/2;
+    if(axis==1) return (primitive(m,x,y+1,z,f,step)-primitive(m,x,y-1,z,f,step))/2;
+    if(z==0) return (-3*primitive(m,x,y,z,f,step)+4*primitive(m,x,y,1,f,step)-primitive(m,x,y,2,f,step))/2;
+    if(z==NZ-1) return (3*primitive(m,x,y,z,f,step)-4*primitive(m,x,y,z-1,f,step)+primitive(m,x,y,z-2,f,step))/2;
+    return (primitive(m,x,y,z+1,f,step)-primitive(m,x,y,z-1,f,step))/2;
 }
 // First reduction stage: one warp-contiguous XY tile, one Z plane per block.
-__global__ void reduceTiles(const real_t *m,double *partial)
+__global__ void reduceTiles(const real_t *m,double *partial,natural_t step=0)
 {
     __shared__ double shared[THREADS];
     const int lane=threadIdx.x, xy=blockIdx.x*THREADS+lane, z=blockIdx.y;
@@ -43,17 +43,17 @@ __global__ void reduceTiles(const real_t *m,double *partial)
     if(xy<STRIDE)
     {
         const int x=xy%NX,y=xy/NX;
-        const double t=primitive(m,x,y,z,TEMP);
-        const double u=primitive(m,x,y,z,UX),v=primitive(m,x,y,z,UY),w=primitive(m,x,y,z,UZ);
+        const double t=primitive(m,x,y,z,TEMP,step);
+        const double u=primitive(m,x,y,z,UX,step),v=primitive(m,x,y,z,UY,step),w=primitive(m,x,y,z,UZ,step);
         s[T]=t;s[U]=u;s[V]=v;s[W]=w;
         s[T2]=t*t;s[U2]=u*u;s[V2]=v*v;s[W2]=w*w;
         s[WT]=w*(t-T_REF);s[KE]=(u*u+v*v+w*w)/2;
         double grad[3][3];
         for(int a=0;a<3;++a) for(int b=0;b<3;++b)
-            grad[a][b]=derivative(m,x,y,z,UX+a,b);
+            grad[a][b]=derivative(m,x,y,z,UX+a,b,step);
         for(int a=0;a<3;++a)
         {
-            const double g=derivative(m,x,y,z,TEMP,a);
+            const double g=derivative(m,x,y,z,TEMP,a,step);
             s[ET]+=double(THERMAL_DIFFUSIVITY)*g*g;
             for(int b=0;b<3;++b)
             {
@@ -61,7 +61,7 @@ __global__ void reduceTiles(const real_t *m,double *partial)
                 s[EU]+=double(VISCOSITY)*strain*strain/2;
             }
         }
-        s[COND]=-double(THERMAL_DIFFUSIVITY)*derivative(m,x,y,z,TEMP,2);
+        s[COND]=-double(THERMAL_DIFFUSIVITY)*derivative(m,x,y,z,TEMP,2,step);
         s[ETA]=s[EU]>0 ? pow(double(VISCOSITY)*VISCOSITY*VISCOSITY/s[EU],0.25) : INFINITY;
         s[ETA_MIN]=s[ETA];s[UMAX]=sqrt(u*u+v*v+w*w);
         s[RHO_SUM]=loadMoment(m,global3(x,y,z),RHO);
@@ -153,7 +153,7 @@ struct Statistics
     }
     void sample(const real_t *m,natural_t step)
     {
-        reduceTiles<<<dim3(TILES,NZ),THREADS>>>(m,partial);
+        reduceTiles<<<dim3(TILES,NZ),THREADS>>>(m,partial,step);
         reducePlanes<<<PROFILE_SIZE,THREADS>>>(partial,deviceProfile);
         outputCheckCuda(cudaGetLastError(),"RBC reductions");
         outputCheckCuda(cudaMemcpy(profile.data(),deviceProfile,PROFILE_SIZE*sizeof(double),cudaMemcpyDeviceToHost),"copy profiles");

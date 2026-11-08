@@ -5,6 +5,7 @@ Examples:
     python3 postRayleigh.py all output/rayleigh_benard/short
     python3 postRayleigh.py convergence output/rayleigh_benard/RUN_ID
     python3 postRayleigh.py grid output/rayleigh_benard/rbc4_n*_rr3
+    python3 postRayleigh.py validation-summary output/rbc_validation --out output/rbc_validation/summary
 
 Reads reduced CSV statistics and metadata. Writes PNG/PDF figures and JSON
 reports without loading full simulation fields or asserting DNS convergence.
@@ -250,13 +251,25 @@ def grid_convergence(runs, out):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('analysis', choices=['convergence', 'profiles', 'scaling', 'grid', 'all'],
+    parser.add_argument('analysis', choices=['convergence', 'profiles', 'scaling', 'grid', 'all',
+                                            'validation', 'validation-summary'],
                         help='plot selection; all generates every figure and report')
-    parser.add_argument('runs', nargs='+', type=Path, help='simulation output directories')
+    parser.add_argument('runs', nargs='+', type=Path,
+                        help='simulation output directories, or a campaign root for validation-summary')
     parser.add_argument('--out', type=Path, default=Path('output/rbc_plots'), help='figure/report output directory')
     a = parser.parse_args()
+    if a.analysis == 'validation-summary':
+        if len(a.runs) != 1:
+            parser.error('validation-summary expects one campaign root')
+        from scripts.rbc_validation_analysis import summarize_campaign
+        summarize_campaign(a.runs[0], a.out)
+        return
     for run in a.runs:
         dest = a.out/run.name
+        if a.analysis == 'validation':
+            from scripts.rbc_validation_analysis import analyze_run
+            analyze_run(run, dest)
+            continue
         if a.analysis in ['convergence', 'all']:
             convergence(run, dest)
         if a.analysis in ['profiles', 'all']:

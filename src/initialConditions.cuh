@@ -93,8 +93,16 @@ __global__ void initializeCase(
     real_t temperature;
     initialPrimitiveFields(x, y, z, rho, uxRaw, uyRaw, uzRaw, temperature);
 
+    real_t a[3];
+#if defined(RBC_VALIDATION_CASE)
+    real_t prescribed[3]; validation::prescribedVelocity(z,0,prescribed);
+    uxRaw=prescribed[0]; uyRaw=prescribed[1]; uzRaw=prescribed[2];
+#if RBC_VALIDATION_CASE == 2
+    temperature+=ActiveCase::MODE_AMPLITUDE*sin(2*validation::PI*x/NX)*sin(validation::PI*z/(NZ-1));
+#endif
+#endif
     const real_t u[3] = {uxRaw, uyRaw, uzRaw};
-    real_t a[3]; acceleration(temperature, boundaryMask(x,y,z)==BULK, a);
+    nodeAcceleration(temperature,x,y,z,0,a);
     moments[midx(idx,RHO)] = rho;
     moments[midx(idx,TEMP)] = temperature;
     for(int d=0; d<3; ++d)
@@ -111,6 +119,20 @@ __global__ void initializeCase(
 #if defined(CASE_RAYLEIGH_BENARD)
     // Exact post-collision conductive flux for a linear temperature field.
     moments[midx(idx,TUZ)] = (TAU_THERMAL-1)*ThermalVelocitySet::cs2()*ActiveCase::DELTA_T/ActiveCase::H;
+#endif
+#if defined(RBC_VALIDATION_CASE) && RBC_VALIDATION_CASE == 2
+    const double h=NZ-1.,X=double(x)/NX,Z=double(z)/h;
+    const double tx=ActiveCase::MODE_AMPLITUDE*2*validation::PI/NX*cos(2*validation::PI*X)*sin(validation::PI*Z);
+    const double tz=(-1+ActiveCase::MODE_AMPLITUDE*validation::PI*sin(2*validation::PI*X)*cos(validation::PI*Z))/h;
+    const double tdt=-THERMAL_DIFFUSIVITY/(h*h)*ActiveCase::MODE_AMPLITUDE*sin(2*validation::PI*X)*sin(validation::PI*Z);
+    moments[midx(idx,TUX)]=temperature*u[0]-(TAU_THERMAL-1)*(tx/3+tdt*u[0]);
+    moments[midx(idx,TUZ)]=-(TAU_THERMAL-1)*tz/3;
+#endif
+#if defined(RBC_VALIDATION_CASE) && RBC_VALIDATION_CASE == 3
+    // Post-collision, force-corrected CE stress, not a persistent full moment.
+    const double grad=ActiveCase::CHANNEL_RE*VISCOSITY/(ActiveCase::H*ActiveCase::H)*validation::PI*
+        cos(validation::PI*z/ActiveCase::H);
+    moments[midx(idx,PXZ)]+=(1-OMEGA_SHEAR)*(-TAU_SHEAR*VelocitySet::cs2()*grad);
 #endif
 
     for (natural_t k = 0; k < NUM_MOMENTS; ++k)

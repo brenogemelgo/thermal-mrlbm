@@ -4,13 +4,13 @@
 
 template <natural_t Q>
 __device__ inline void accumulateDirection(const real_t *m, natural_t x, natural_t y, natural_t z,
-                                           HydroState &s, real_t &t, real_t (&j)[3])
+                                           HydroState &s, real_t &t, real_t (&j)[3],natural_t step=0)
 {
     constexpr int cx=VelocitySet::cx<Q>(), cy=VelocitySet::cy<Q>(), cz=VelocitySet::cz<Q>();
     const natural_t n=jetPullNeighborIndex(x,y,z,cx,cy,cz);
     const HydroState src=loadHydro(m,n);
     const natural_t sz=n/STRIDE;
-    real_t a[3]; acceleration(loadMoment(m,n,TEMP),sz>0 && sz<NZ-1,a);
+    real_t a[3]; nodeAcceleration(loadMoment(m,n,TEMP),n%NX,(n/NX)%NY,sz,step,a);
     const real_t f=hydroPopulation<Q>(src,a);
     s.rho += f;
     s.v[0] += cx*f; s.v[1] += cy*f; s.v[2] += cz*f;
@@ -19,7 +19,10 @@ __device__ inline void accumulateDirection(const real_t *m, natural_t x, natural
     s.p[2] += VelocitySet::hzz<Q>()*f;
     s.p[3] += cx*cy*f; s.p[4] += cx*cz*f; s.p[5] += cy*cz*f;
     const real_t js[3]={loadMoment(m,n,TUX),loadMoment(m,n,TUY),loadMoment(m,n,TUZ)};
-    const real_t g=thermalPopulation<Q>(loadMoment(m,n,TEMP),js);
+    // V2 stores physical T while the reconstructed post-source zeroth moment
+    // is T+Q/2. This implements trapezoidal scalar-source integration.
+    const real_t g=thermalPopulation<Q>(loadMoment(m,n,TEMP)+
+        validation::scalarSource(n%NX,sz,step)/2,js);
     t += g; j[0] += cx*g; j[1] += cy*g; j[2] += cz*g;
 }
 
@@ -48,7 +51,7 @@ __global__ void streamCollide(const real_t *__restrict__ moments, real_t *__rest
 #endif
     {
         constexpr_for<0,VelocitySet::Q()>([&](auto q) {
-            accumulateDirection<q>(moments,x,y,z,s,t,j);
+            accumulateDirection<q>(moments,x,y,z,s,t,j,step);
         });
         const real_t inv=1/s.rho;
 #pragma unroll
@@ -58,13 +61,21 @@ __global__ void streamCollide(const real_t *__restrict__ moments, real_t *__rest
     }
     s.p[0]-=s.v[0]*s.v[0]; s.p[1]-=s.v[1]*s.v[1]; s.p[2]-=s.v[2]*s.v[2];
     s.p[3]-=s.v[0]*s.v[1]; s.p[4]-=s.v[0]*s.v[2]; s.p[5]-=s.v[1]*s.v[2];
-    real_t a[3]; acceleration(t,type==BULK,a);
+    t+=validation::scalarSource(x,z,step+1)/2;
+    real_t a[3]; nodeAcceleration(t,x,y,z,step+1,a);
     const real_t ramp=topSpongeRamp(z);
     const real_t ws=1/(TAU_SHEAR+ramp*(TAU_SHEAR_SPONGE_MAX-TAU_SHEAR));
     const real_t wb=1/(TAU_BULK+ramp*(TAU_BULK_SPONGE_MAX-TAU_BULK));
     const real_t wt=1/(TAU_THERMAL+ramp*(TAU_THERMAL_SPONGE_MAX-TAU_THERMAL));
-    const real_t u[3]={s.v[0]+a[0]/2,s.v[1]+a[1]/2,s.v[2]+a[2]/2};
+    real_t u[3]={s.v[0]+a[0]/2,s.v[1]+a[1]/2,s.v[2]+a[2]/2};
     s=collideHydro(s,a,ws,wb);
+#if defined(RBC_VALIDATION_CASE) && RBC_VALIDATION_CASE == 2
+    // V2 isolates the scalar equation: velocity is prescribed, not solved.
+    validation::prescribedVelocity(z,step+1,u);
+    s.rho=1;
+    for(int d=0;d<3;++d) s.v[d]=u[d];
+    for(int d=0;d<6;++d) s.p[d]=0;
+#endif
     dbuffer[midx(idx,RHO)]=s.rho;
 #pragma unroll
     for(int d=0;d<3;++d)

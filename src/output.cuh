@@ -106,9 +106,15 @@ static inline void setSimulationRunId(
     simulationRunId() = runId;
 }
 
+static inline std::filesystem::path &simulationOutputRoot()
+{
+    static std::filesystem::path root("output");
+    return root;
+}
+
 static inline std::filesystem::path getSimulationOutputDirectory()
 {
-    return std::filesystem::path("output") / outputCaseFolderName() / simulationRunId();
+    return simulationOutputRoot() / outputCaseFolderName() / simulationRunId();
 }
 
 static inline std::filesystem::path getBinaryOutputDirectory()
@@ -187,6 +193,16 @@ static inline void writeMetadata(
     out << "TCOLD = " << static_cast<double>(T_COLD) << '\n';
     out << "T_REF = " << static_cast<double>(T_REF) << '\n';
     out << "GBETA = " << static_cast<double>(BETA_THERMAL) << '\n';
+#if defined(RBC_VALIDATION_CASE)
+    out << "validation_case = V" << RBC_VALIDATION_CASE << '\n';
+    out << "validation_formula_version = " << ActiveCase::FORMULA_VERSION << '\n';
+    out << "validation_mode_amplitude = " << ActiveCase::MODE_AMPLITUDE << '\n';
+    out << "validation_peclet = " << ActiveCase::PECLET << '\n';
+    out << "validation_channel_re = " << ActiveCase::CHANNEL_RE << '\n';
+    out << "validation_time_scale = diffusive\n";
+    out << "validation_source_scheme = trapezoidal_zeroth_moment\n";
+    out << "validation_velocity = " << (RBC_VALIDATION_CASE==2 ? "prescribed" : "solved") << '\n';
+#endif
 
 #if defined(CASE_RAYLEIGH_BENARD)
     out << "timeAverageEnabled = " << ActiveCase::timeAverageEnabled << '\n';

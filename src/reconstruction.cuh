@@ -1,6 +1,7 @@
 #pragma once
 #include "deviceFunctions.cuh"
 #include "bitmasks.cuh"
+#include "validation/physics.cuh"
 
 // All moments here are divided by rho, except thermal moments.
 struct HydroState
@@ -14,6 +15,16 @@ __device__ __host__ inline void acceleration(real_t temperature, bool bulk, real
     a[0] = b * THERMAL_GRAVITY_X;
     a[1] = b * THERMAL_GRAVITY_Y;
     a[2] = b * THERMAL_GRAVITY_Z;
+}
+
+// Every time-dependent force consumer must use the time of its moment buffer.
+__device__ __host__ inline void nodeAcceleration(real_t temperature,natural_t x,natural_t y,
+                                                natural_t z,double step,real_t (&a)[3])
+{
+    acceleration(temperature,z>0 && z<NZ-1,a);
+#if defined(RBC_VALIDATION_CASE) && RBC_VALIDATION_CASE == 3
+    if(z>0 && z<NZ-1) validation::channelAcceleration(z,step,a);
+#endif
 }
 
 // Force-adjusted stress C2 = A2/rho - uu - S2/2 on a post-collision field.

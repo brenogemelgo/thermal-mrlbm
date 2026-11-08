@@ -34,6 +34,11 @@ def main():
     p.add_argument('--list', action='store_true')
     p.add_argument('--test-grid', action='store_true', help='allow a non-production grid')
     p.add_argument('--conduction', action='store_true')
+    p.add_argument('--validation', choices=['V1', 'V2', 'V3'],
+                   help='isolated analytical validation physics (campaign sets schedules)')
+    p.add_argument('--precision', choices=['single', 'double'],
+                   help='default: double for analytical validation, single for production')
+    p.add_argument('--output-root', type=Path, default=ROOT/'output')
     p.add_argument('--sample', type=int, default=100)
     p.add_argument('--transient-steps', type=int)
     p.add_argument('--steps', type=int, help='absolute final step, also compiled as NSTEPS')
@@ -44,23 +49,34 @@ def main():
     p.add_argument('--arch', default='sm_86')
     p.add_argument('--build-only', action='store_true')
     a = p.parse_args()
+    a.precision = a.precision or ('double' if a.validation else 'single')
     if a.list:
         print(json.dumps([parameters(c, n) for c in CASES for n in CASES[c][2]], indent=2))
         return
     n = a.grid or CASES[a.case][2][0]
-    if n < 4 or (n not in CASES[a.case][2] and not a.test_grid):
+    if n < 4 or (n not in CASES[a.case][2] and not (a.test_grid or a.validation)):
         p.error('grid must belong to the case; use --test-grid for short verification')
+    if a.validation:
+        if a.steps is None:
+            a.steps = (n-1)**2*(1 if a.validation == 'V1' else 5)
+        if a.transient_steps is None:
+            a.transient_steps = 0
     if a.sample <= 0 or a.checkpoint_every <= 0 or (a.steps is not None and a.steps < 0) or (a.transient_steps is not None and a.transient_steps < 0):
         p.error('invalid interval or step count')
     build = ROOT / 'build'
     build.mkdir(exist_ok=True)
-    exe = build / f'rbc{a.case}_n{n}_rr{a.rr}'
+    tag = a.validation.lower() if a.validation else f'rbc{a.case}'
+    exe = build / f'{tag}_n{n}_rr{a.rr}_{a.precision}'
     cmd = ['nvcc', '-std=c++20', '-O3', '--restrict', '--expt-relaxed-constexpr',
            '--extended-lambda', f'-arch={a.arch}', '-DCASE_RAYLEIGH_BENARD',
            f'-DRBC_CASE={a.case}', f'-DRBC_N={n}', f'-DREGULARIZATION_ORDER={a.rr}',
            f'-DRBC_SAMPLE={a.sample}', f'-DRBC_STAMP={a.checkpoint_every}']
-    if a.conduction:
+    if a.conduction or a.validation:
         cmd += ['-DRBC_RA=0']
+    if a.validation:
+        cmd += [f'-DRBC_VALIDATION_CASE={a.validation[1:]}']
+    if a.precision == 'double':
+        cmd += ['-DMRL_DOUBLE_PRECISION']
     if a.transient_steps is not None:
         cmd += [f'-DRBC_TRANSIENT_STEPS={a.transient_steps}']
     if a.steps is not None:
@@ -70,8 +86,9 @@ def main():
     subprocess.run(cmd, cwd=ROOT, check=True)
     if a.build_only:
         return
-    rid = a.run_id or f'rbc{a.case}_n{n}_rr{a.rr}'
-    run = [str(exe), '--runId', rid, '--checkpoint-every', str(a.checkpoint_every)]
+    rid = a.run_id or (f'{tag}_n{n}_rr{a.rr}_{a.precision}' if a.validation else f'rbc{a.case}_n{n}_rr{a.rr}')
+    run = [str(exe), '--runId', rid, '--checkpoint-every', str(a.checkpoint_every),
+           '--output-root', str(a.output_root.resolve())]
     if a.resume:
         run += ['--continue']
     if a.fields:

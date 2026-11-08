@@ -272,9 +272,14 @@ def readPackedField(runDir, metadata, fieldName, stepValue):
     if canonicalName in velocityFields and metadata.get("moment_format") == "neq_post_v2":
         temperature = readPackedField(runDir, metadata, "temperature", stepValue)
         axis = {"ux": "X", "uy": "Y", "uz": "Z"}[canonicalName]
-        acceleration = getFloat(metadata, "GBETA") * getFloat(metadata, f"GRAVITY_{axis}") * (
-            temperature - getFloat(metadata, "T_REF"))
-        acceleration[[0, -1], :, :] = 0
+        if metadata.get("validation_case") == "V3":
+            from scripts.rbc_validation_reference import exact
+            component = {"X": 0, "Y": 1, "Z": 2}[axis]
+            acceleration = exact("V3", getInt(metadata, "NZ"), stepValue)["a"][component][:, None, :]
+        else:
+            acceleration = getFloat(metadata, "GBETA") * getFloat(metadata, f"GRAVITY_{axis}") * (
+                temperature - getFloat(metadata, "T_REF"))
+            acceleration[[0, -1], :, :] = 0
         field = field - 0.5 * acceleration
     return field
 

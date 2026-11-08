@@ -46,7 +46,12 @@ static_assert(RR_ORDER == 2 || RR_ORDER == 3, "Select RR2 or RR3");
 
 #if defined(CASE_RAYLEIGH_BENARD)
 #include "../cases/rayleighBenard.cuh"
+#if defined(RBC_VALIDATION_CASE)
+#include "../cases/rbcValidation.cuh"
+using ActiveCase = RBCValidationCase;
+#else
 using ActiveCase = RayleighBenardCase;
+#endif
 constexpr bool CASE_IS_RAYLEIGH_BENARD = true;
 constexpr bool CASE_IS_JET = false;
 #elif defined(CASE_JET)

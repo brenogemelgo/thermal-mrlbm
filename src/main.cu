@@ -4,6 +4,7 @@
 #include "initialConditions.cuh"
 #include "kernel.cuh"
 #include "checkpoint.cuh"
+#include "validation/output.cuh"
 
 #define CUDA_CHECK(call) outputCheckCuda((call),#call)
 
@@ -27,10 +28,11 @@ static int run(int argc,char **argv)
         const std::string arg=argv[i];
         if(arg=="--continue" || arg=="continue") resume=true;
         else if(arg=="--fields") fields=true;
-        else if(arg=="--runId" || arg=="--steps" || arg=="--checkpoint-every")
+        else if(arg=="--runId" || arg=="--steps" || arg=="--checkpoint-every" || arg=="--output-root")
         {
             if(++i>=argc) throw std::runtime_error("missing value for "+arg);
             if(arg=="--runId") runId=argv[i];
+            else if(arg=="--output-root") simulationOutputRoot()=argv[i];
             else if(arg=="--steps") endStep=parseStep(argv[i]);
             else checkpointEvery=parseStep(argv[i]);
         }
@@ -74,6 +76,10 @@ static int run(int argc,char **argv)
     stats.initializeSeries(resume,startStep);
     if(!resume) stats.sample(moments,0);
 #endif
+#if defined(RBC_VALIDATION_CASE)
+    validation::SliceOutput validationOutput;
+    if(!resume) validationOutput.save(moments,moments,0);
+#endif
     CUDA_CHECK(cudaDeviceSynchronize());
     std::cout<<"case "<<ActiveCase::NAME<<" grid "<<NX<<'x'<<NY<<'x'<<NZ<<" RR"<<RR_ORDER
              <<" nu="<<VISCOSITY<<" kappa="<<THERMAL_DIFFUSIVITY<<" tau="<<TAU_SHEAR
@@ -83,9 +89,13 @@ static int run(int argc,char **argv)
     {
         streamCollide<<<grid,block>>>(moments,buffer,step-1);
 #if defined(CASE_RAYLEIGH_BENARD)
-        applyNEEPlates<<<dim3((NX+31)/32,(NY+3)/4,2),dim3(32,4)>>>(buffer);
+        applyNEEPlates<<<dim3((NX+31)/32,(NY+3)/4,2),dim3(32,4)>>>(buffer,step);
 #endif
         std::swap(moments,buffer);CUDA_CHECK(cudaGetLastError());
+#if defined(RBC_VALIDATION_CASE)
+        if(step%ActiveCase::timeAverageStride==0 || step==endStep)
+            validationOutput.save(moments,buffer,step);
+#endif
 #if defined(CASE_RAYLEIGH_BENARD)
         // Fixed lattice-step sampling; first average is strictly after the transient.
         if((step<=ActiveCase::timeAverageStart && step%ActiveCase::timeAverageStride==0) ||

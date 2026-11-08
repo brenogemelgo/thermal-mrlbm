@@ -7,6 +7,9 @@ horizontally periodic Rayleigh–Bénard convection.
 See [the RBC implementation and run guide](docs/rbc.md) for the four case families,
 plate/forcing conventions, diagnostics, checkpoints, and post-processing.
 [Validation results](docs/validation.md) describe focused tests and remaining limits.
+The separate [pre-production campaign](docs/preproduction-validation.md) implements
+V1–V5, manufactured solutions, sequential execution/resume, and consolidated
+analysis. That campaign has not been compiled or run.
 
 ```bash
 # Inspect the production configurations without running them.

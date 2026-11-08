@@ -11,6 +11,19 @@ struct CheckpointHeader
     uint64_t step=0,start=ActiveCase::timeAverageStart,stride=ActiveCase::timeAverageStride;
     std::array<double,9> physics={double(VISCOSITY),double(THERMAL_DIFFUSIVITY),double(BETA_THERMAL),
         double(T_HOT),double(T_COLD),double(T_REF),double(THERMAL_GRAVITY_X),double(THERMAL_GRAVITY_Y),double(THERMAL_GRAVITY_Z)};
+#if defined(RBC_VALIDATION_CASE)
+    // Encode the manufactured physics in the existing header without changing
+    // the production checkpoint ABI. Production and V1/V2/V3 cannot cross-load.
+    CheckpointHeader()
+    {
+        fields=NUM_MOMENTS | (uint32_t(RBC_VALIDATION_CASE)<<24);
+        // Unused buoyancy/gravity slots fingerprint manufactured source parameters.
+        physics[2]=ActiveCase::MODE_AMPLITUDE;
+        physics[6]=ActiveCase::PECLET;
+        physics[7]=ActiveCase::CHANNEL_RE;
+        physics[8]=ActiveCase::FORMULA_VERSION;
+    }
+#endif
 };
 
 template<class T> inline void checkpointWrite(std::ostream &out,const T *p,size_t n=1)
@@ -77,7 +90,7 @@ static natural_t restoreCheckpoint(real_t *m,rbc::Statistics &s)
     const auto path=latestCheckpoint();std::ifstream in(path,std::ios::binary);
     CheckpointHeader h,expected;checkpointRead(in,&h);
     if(std::memcmp(h.magic,expected.magic,8) || h.nx!=NX || h.ny!=NY || h.nz!=NZ ||
-       h.fields!=NUM_MOMENTS || h.precision!=sizeof(real_t) || h.rr!=RR_ORDER || h.start!=expected.start ||
+       h.fields!=expected.fields || h.precision!=sizeof(real_t) || h.rr!=RR_ORDER || h.start!=expected.start ||
        h.stride!=expected.stride || h.physics!=expected.physics || h.step>UINT32_MAX)
         throw std::runtime_error("incompatible checkpoint moment format, grid, physics, RR order or averaging schedule");
     restoreMoments(in,m);

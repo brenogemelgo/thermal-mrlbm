@@ -2,15 +2,13 @@
 """Run the pre-production matrix sequentially, preserving checkpoints and results."""
 import argparse
 from contextlib import contextmanager
-from datetime import datetime, timezone
 import fcntl
 import json
 from pathlib import Path
-import shlex
-import subprocess
 import sys
 
 from rbc_validation_cases import GRIDS, jobs
+from rbc_production import execute
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -42,14 +40,6 @@ def lock_campaign(root):
         yield
 
 
-def execute(cmd, log):
-    print(shlex.join(map(str, cmd)), flush=True)
-    with log.open('a') as out:
-        out.write('\n'+datetime.now(timezone.utc).isoformat()+' '+shlex.join(map(str, cmd))+'\n')
-        out.flush()
-        subprocess.run([str(s) for s in cmd], cwd=ROOT, stdout=out, stderr=subprocess.STDOUT, check=True)
-
-
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--only', nargs='+', action='append', help='V1,V2 or V1 V2; default: V1–V5')
@@ -58,7 +48,9 @@ def main():
                    help='V3 order/comparison; V1,V2,V4,V5 always use RR3')
     p.add_argument('--resume', action='store_true', help='resume interrupted jobs and skip completed simulations')
     p.add_argument('--post-only', action='store_true', help='analyze completed jobs; never build or simulate')
-    p.add_argument('--root', type=Path, default=ROOT/'output/rbc_validation')
+    p.add_argument('--root', type=Path, default=ROOT/'output/rbc_validation_state', help='campaign state directory')
+    p.add_argument('--output-root', type=Path, default=ROOT/'output', help='raw data root')
+    p.add_argument('--results-root', type=Path, default=ROOT/'results', help='processed results root')
     p.add_argument('--arch', default='sm_86')
     p.add_argument('--checkpoint-every', type=int, help='override checkpoint interval for every job')
     a = p.parse_args()
@@ -80,9 +72,9 @@ def main():
         failure = None
         try:
             for job in jobs(selected, a.rr, a.checkpoint_every):
-                output_root = root/job.test
+                output_root = a.output_root.resolve()
                 run = output_root/'rayleigh_benard'/job.run_id
-                post = output_root/'post'/job.run_id
+                post = a.results_root.resolve()/job.run_id
                 description = job.description()
                 entry = dict(description, run=str(run), post=str(post), status='not_run')
                 previous = state['jobs'].get(job.run_id)
@@ -131,8 +123,9 @@ def main():
                 # A post-processing failure never removes the successful simulation receipt.
                 entry['status'] = 'postprocessing'
                 atomic_json(state_path, state)
+                post.mkdir(parents=True, exist_ok=True)
                 execute([sys.executable, ROOT/'postRayleigh.py', 'validation', run,
-                         '--out', output_root/'post'], run/'postprocess.log')
+                         '--out', a.results_root.resolve()], post/'postprocess.log')
                 numerical = json.loads((post/'validation_result.json').read_text())
                 entry.update(status='post_complete', numerical_status=numerical['status'])
                 entry.pop('error', None)
@@ -154,8 +147,9 @@ def main():
                 state['jobs'].setdefault(job.run_id, dict(job.description(), status='not_run'))
             atomic_json(state_path, state)
             try:
+                a.results_root.mkdir(parents=True, exist_ok=True)
                 execute([sys.executable, ROOT/'postRayleigh.py', 'validation-summary', root,
-                         '--out', root/'summary'], root/'summary.log')
+                         '--out', a.results_root.resolve()], a.results_root/'validation_summary.log')
             except (Exception, KeyboardInterrupt) as error:
                 atomic_json(root/'summary_failure.json', {'status': 'failed', 'error': str(error),
                             'campaign_state': str(state_path)})

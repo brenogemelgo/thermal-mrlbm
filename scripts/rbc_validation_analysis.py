@@ -1,28 +1,38 @@
 """Post-processing only. Functions run only through explicit CLI requests."""
-import csv
 import hashlib
 import json
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import h5py
 
 from postRayleigh import NUS, clean_json, convergence, load, metadata, profiles, report, save, uncertainty
 from scripts.rbc_validation_reference import exact, force_identity, stress_tensor, NU, KAPPA
+from scripts.rbc_hdf5 import data_directory
 
 
 def write_json(path, value):
     path.write_text(json.dumps(clean_json(value), indent=2, allow_nan=False)+'\n')
 
 
-def write_csv(path, rows, columns=None):
+def write_table(path, rows, columns=None):
+    """Write numerical tables as columnar HDF5."""
     rows = list(rows)
     columns = columns or sorted({k for row in rows for k in row})
-    with path.open('w', newline='') as out:
-        w = csv.DictWriter(out, fieldnames=columns)
-        w.writeheader()
-        for row in rows:
-            w.writerow({k: row.get(k) for k in columns})
+    target = path.with_suffix('.h5')
+    temp = target.with_suffix('.h5.tmp')
+    with h5py.File(temp, 'w') as out:
+        out.attrs['schema'] = 'thermal-mrlbm-derived-columns-v1'
+        group = out.create_group('columns')
+        for column in columns:
+            values = [row.get(column) for row in rows]
+            if all(v is None or isinstance(v, (int, float, np.number)) for v in values):
+                data = np.array([np.nan if v is None else v for v in values], dtype=float)
+            else:
+                data = np.array(['' if v is None else str(v) for v in values], dtype=h5py.string_dtype())
+            group.create_dataset(column, data=data, compression='gzip')
+    temp.replace(target)
 
 
 def status(checks):
@@ -59,9 +69,16 @@ def lap(t):
 
 def snapshots(run, target):
     entries = []
-    for path in (run/'validation').glob('snapshot_*.json'):
-        info = json.loads(path.read_text())
+    import h5py
+    for path in (data_directory(run)/'validation').glob('snapshot_*.h5'):
+        with h5py.File(path, 'r') as source:
+            info = {k: v.decode() if isinstance(v, bytes) else str(v) for k, v in source.attrs.items()}
+        info = {k: int(v) if k != 'case' else v for k, v in info.items()}
         if info['step'] <= target:
+            entries.append((info['step'], path, info))
+    for path in (data_directory(run)/'validation').glob('snapshot_*.json'):
+        info = json.loads(path.read_text())
+        if info['step'] <= target and not path.with_suffix('.h5').exists():
             entries.append((info['step'], path, info))
     entries.sort()
     if not entries or entries[0][0] != 0 or entries[-1][0] != target:
@@ -70,7 +87,11 @@ def snapshots(run, target):
         n = info['nx']
         if info['schema'] != 1 or n != info['nz'] or info['channels'] != 29:
             raise ValueError(f'incompatible slice schema: {path}')
-        data = np.fromfile(path.with_suffix('.bin'), dtype=np.float64)
+        if path.suffix == '.h5':
+            with h5py.File(path, 'r') as source:
+                data = source['moments'][:]
+        else:
+            data = np.fromfile(path.with_suffix('.bin'), dtype=np.float64)
         if data.size != 29*n*n:
             raise ValueError(f'truncated slice: {path}')
         yield info, data.reshape(29, n, n)
@@ -168,7 +189,7 @@ def analytical(run, out, job, m):
                             'Independent D3Q27 quadrature and direct Guo collision; tolerance is a floating-point forward-error budget.'))
     checks.append(dict(name='continuum_accuracy', status='inconclusive',
                        detail='Report errors and refinement order; no universal finite-grid truncation tolerance is imposed.'))
-    write_csv(out/'analytical_history.csv', rows)
+    write_table(out/'analytical_history.h5', rows)
     now, ref, physical = final
     z = np.arange(n)/(n-1)
     omega = 1/(.5+3*NU)
@@ -177,7 +198,7 @@ def analytical(run, out, job, m):
                          temperature_exact=float(ref['T'][i].mean()), ux=float(physical[0, i].mean()),
                          ux_exact=float(ref['u'][0, i].mean()), stress_xz=float(stress[0, 2, i].mean()),
                          stress_xz_exact=float(ref['stress'][0, 2, i].mean())) for i in range(n)]
-    write_csv(out/'analytical_profiles.csv', profile_rows)
+    write_table(out/'analytical_profiles.h5', profile_rows)
     fig, ax = plt.subplots(1, 2, figsize=(9, 3.5))
     for key in ('temperature_l1', 'temperature_l2', 'temperature_linf'):
         ax[0].semilogy([r['diffusive_time'] for r in rows], [max(r[key], np.finfo(float).tiny) for r in rows], label=key)
@@ -218,7 +239,7 @@ def analytical(run, out, job, m):
     if test == 'V1':
         series = load(run, 'rbc_timeseries.csv')
         nu_rows = [dict(step=int(row['step']), **{key: float(row[key]) for key in NUS}) for row in series]
-        write_csv(out/'conduction_nusselt.csv', nu_rows)
+        write_table(out/'conduction_nusselt.h5', nu_rows)
         result['nusselt'] = {key: dict(final=float(series[key][-1]), maximum_error=float(np.max(np.abs(series[key]-1)))) for key in NUS}
         result['kinetic_nusselt_note'] = 'Ra=0 makes the kinetic-dissipation identity singular; its conduction-limit diagnostic is 1.'
         fig, ax = plt.subplots(1, 2, figsize=(9, 3.5))
@@ -270,7 +291,9 @@ def turbulent(run, out, job, m):
     for key in NUS:
         seed = int.from_bytes(hashlib.sha256((job['run_id']+key).encode()).digest()[:8], 'little')
         scalars[key], bootstrap[key] = confidence(avg[key], seed)
-    np.savez_compressed(out/'nusselt_bootstrap.npz', **bootstrap)
+    with h5py.File(out/'nusselt_bootstrap.h5', 'w') as output:
+        for key, values in bootstrap.items():
+            output.create_dataset(key, data=values, compression='gzip')
     rows = []
     for key, info in scalars.items():
         ci = info['confidence_interval_95']
@@ -278,7 +301,7 @@ def turbulent(run, out, job, m):
                          ci95_lower=ci[0] if ci else None, ci95_upper=ci[1] if ci else None,
                          effective_samples=info['effective_samples'], block_samples=info['block_samples'],
                          blocks=info['independent_blocks'], half_mean_relative_difference=info.get('half_mean_relative_difference')))
-    write_csv(out/'nusselt_confidence.csv', rows)
+    write_table(out/'nusselt_confidence.h5', rows)
     checks.append(dict(name='statistical_stationarity', status='inconclusive', detail='Intervals and half-record drift are reported; no automatic stationarity claim.'))
     checks.append(dict(name='dns_resolution', status='inconclusive', detail='Nu(z), boundary-layer cells, local Delta/eta and dissipation are diagnostic evidence, not a DNS certificate.'))
     fig, ax = plt.subplots(figsize=(7, 3.5))
@@ -313,7 +336,7 @@ def analyze_run(run, out):
     result = analytical(run, out, job, m) if job['test'] in ('V1', 'V2', 'V3') else turbulent(run, out, job, m)
     result.update(run=str(run), run_id=job['run_id'], analysis_completed=True)
     write_json(out/'validation_result.json', result)
-    write_csv(out/'checks.csv', result['checks'], ['name', 'status', 'detail'])
+    write_table(out/'checks.h5', result['checks'], ['name', 'status', 'detail'])
     return result
 
 
@@ -335,8 +358,8 @@ def summarize_campaign(root, out):
         outcome = result['status'] if result else 'failed' if entry['status'] == 'failed' else 'inconclusive'
         rows.append(dict(test=entry['test'], grid=entry['n'], rr=entry['rr'], execution=entry['status'],
                          status=outcome, run_id=entry['run_id'], detail=entry.get('error', 'not executed' if not result else 'see per-run checks')))
-    write_csv(out/'campaign_summary.csv', rows, ['test', 'grid', 'rr', 'execution', 'status', 'run_id', 'detail'])
-    write_csv(out/'campaign_checks.csv', all_checks, ['test', 'grid', 'rr', 'name', 'status', 'detail'])
+    write_table(out/'campaign_summary.h5', rows, ['test', 'grid', 'rr', 'execution', 'status', 'run_id', 'detail'])
+    write_table(out/'campaign_checks.h5', all_checks, ['test', 'grid', 'rr', 'name', 'status', 'detail'])
     refinements = []
     fig, axes = plt.subplots(1, 3, figsize=(12, 3.5))
     for axis, test in zip(axes, ['V1', 'V2', 'V3']):
@@ -363,7 +386,7 @@ def summarize_campaign(root, out):
         if axis.lines:
             axis.legend(fontsize=5)
     save(fig, out, 'analytical_spatial_convergence')
-    write_csv(out/'spatial_convergence.csv', refinements,
+    write_table(out/'spatial_convergence.h5', refinements,
               ['test', 'rr', 'metric', 'coarse', 'fine', 'h_coarse', 'h_fine',
                'error_coarse', 'error_fine', 'observed_order', 'status', 'note'])
     grids = []
@@ -375,9 +398,12 @@ def summarize_campaign(root, out):
             for (ce, coarse), (fe, fine) in zip(group[:-1], group[1:]):
                 a, b = coarse['scalars'][key]['mean'], fine['scalars'][key]['mean']
                 low = high = None
-                with np.load(Path(ce['post'])/'nusselt_bootstrap.npz') as ca, np.load(Path(fe['post'])/'nusselt_bootstrap.npz') as fa:
+                def bootstrap_file(entry):
+                    path = Path(entry['post'])/'nusselt_bootstrap.h5'
+                    return h5py.File(path, 'r') if path.exists() else np.load(path.with_suffix('.npz'))
+                with bootstrap_file(ce) as ca, bootstrap_file(fe) as fa:
                     if len(ca[key]) and len(fa[key]):
-                        low, high = np.quantile(fa[key]-ca[key], [.025, .975]).tolist()
+                        low, high = np.quantile(np.asarray(fa[key])-np.asarray(ca[key]), [.025, .975]).tolist()
                 grids.append(dict(test=test, estimator=key, coarse=coarse['grid'], fine=fine['grid'],
                                   difference=b-a, relative_difference=(b-a)/a, ci95_difference_lower=low,
                                   ci95_difference_upper=high, status='inconclusive',
@@ -386,7 +412,7 @@ def summarize_campaign(root, out):
         if axis.lines:
             axis.legend(fontsize=6)
     save(fig, out, 'rbc_grid_differences')
-    write_csv(out/'rbc_grid_differences.csv', grids,
+    write_table(out/'rbc_grid_differences.h5', grids,
               ['test', 'estimator', 'coarse', 'fine', 'difference', 'relative_difference',
                'ci95_difference_lower', 'ci95_difference_upper', 'status', 'note'])
     comparison = []
@@ -396,7 +422,7 @@ def summarize_campaign(root, out):
         if 2 in by_order and 3 in by_order:
             for metric in ('velocity_relative_l2', 'stress_relative_l2', 'force_identity_linf'):
                 comparison.append(dict(grid=n, metric=metric, rr2=by_order[2]['final'][metric], rr3=by_order[3]['final'][metric]))
-    write_csv(out/'rr2_rr3_comparison.csv', comparison, ['grid', 'metric', 'rr2', 'rr3'])
+    write_table(out/'rr2_rr3_comparison.h5', comparison, ['grid', 'metric', 'rr2', 'rr3'])
     fig, axes = plt.subplots(1, 2, figsize=(9, 3.5))
     for axis, metric in zip(axes, ['velocity_relative_l2', 'stress_relative_l2']):
         for rr in (2, 3):
@@ -421,6 +447,6 @@ def summarize_campaign(root, out):
              '', f"Individual checks: {check_counts['passed']} passed, {check_counts['failed']} failed, {check_counts['inconclusive']} inconclusive.",
              '', '| Test | N | RR | Execution | Assessment |', '| --- | --- | --- | --- | --- |']
     lines += [f"| {r['test']} | {r['grid']} | {r['rr']} | {r['execution']} | {r['status']} |" for r in rows]
-    lines += ['', 'See per-run checks and CSV/JSON diagnostics. Continuum accuracy and turbulent DNS convergence require assessment; no exact RBC Nusselt acceptance value is imposed.']
+    lines += ['', 'See per-run checks and HDF5/JSON diagnostics. Continuum accuracy and turbulent DNS convergence require assessment; no exact RBC Nusselt acceptance value is imposed.']
     (out/'campaign_summary.md').write_text('\n'.join(lines)+'\n')
     return summary

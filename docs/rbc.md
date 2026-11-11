@@ -23,8 +23,10 @@ python3 scripts/run_rbc.py --case 1 --grid 12 --test-grid --conduction --steps 2
 Use `--continue` with the same run ID, grid, physics, RR order and sampling schedule.
 An existing run with checkpoints cannot be overwritten by a fresh run. The native
 executable accepts `--steps N` (absolute end step), `--checkpoint-every N`,
-`--runId ID`, `--continue`, and `--fields`. The default output contains reduced
-statistics and checkpoints; `--fields` additionally exports full SoA moments/VTI.
+`--runId ID`, `--continue`, `--hdf5-root PATH`, and `--fields`. The default output contains reduced
+statistics and checkpoints. `--fields` additionally exports HDF5 temperature and
+physical velocity at the checkpoint cadence. Independent `--field-every` and
+`--slice-every` intervals are preferable; see [the production guide](production-rbc.md).
 
 The existing `run.sh`/`runContinue.sh` entry points remain, with `CUDA_ARCH` and
 `NVCC_FLAGS` overrides. They now build under `build/` and preserve existing output.
@@ -35,8 +37,8 @@ The Python launcher is preferable for the full case/grid selection.
 
 | Case | Ra | Pr | Cubes | Transient / average (free-fall times) |
 | --- | --- | --- | --- | --- |
-| RBC-1 | 1e6 | 0.7 | 64, 96, 128 | 100 / 150 |
-| RBC-2 | 1e7 | 0.7 | 128, 192, 256 | 100 / 200 |
+| RBC-1 | 1e6 | 0.7 | 64, 96, 128, 512 | 100 / 150 |
+| RBC-2 | 1e7 | 0.7 | 128, 192, 256, 512 | 100 / 200 |
 | RBC-3 | 1e8 | 0.7 | 256, 384, 512 | 200 / 300 |
 | RBC-4 | 1e8 | 1.0 | 256, 384, 512 | 200 / 300 |
 
@@ -57,7 +59,8 @@ this acceleration; it is not divided by rho again. Ra=0 disables buoyancy and
 perturbations and uses nu=0.01, kappa=nu/Pr. Uff=0.05 remains a nominal time unit
 in that verification case; it is not a physical buoyancy velocity when Ra=0.
 The 512³ moment buffers alone require 14 GiB; reductions require additional memory.
-No multi-GPU support or production campaign is added by this change.
+All four production cases now use 512³; see [the production guide](production-rbc.md).
+No multi-GPU support is added.
 
 Compile-time overrides: `RBC_CASE`, `RBC_N`, `RBC_RA`, `RBC_PR`, `RBC_STEPS`,
 `RBC_TRANSIENT_STEPS`, `RBC_SAMPLE`, `RBC_STAMP`, `RBC_PERTURBATION`, and
@@ -74,7 +77,8 @@ The output stress names are pxx, pyy, pzz, pxy, pxz, pyz.
 For pre-collision population velocity q and acceleration a, physical velocity is
 u=q+a/2. Stored post-collision velocity is v=q+a=u+a/2. Diagnostics and
 `postCommon.readPackedField` return the physical velocity by subtracting a/2;
-raw moment/VTI exports retain the explicitly documented stored v convention.
+legacy packed moment exports retain the stored v convention; current physical
+HDF5 fields and offline VTI conversion use physical u.
 Acceleration is zero on the plate nodes, where v=u=0.
 
 Collision is performed on the deviator and trace of the pre-collision stress P,
@@ -159,16 +163,26 @@ The dissipation identities require stationary averaging; their instantaneous
 values need not agree with the heat-flux estimates. In the Ra=0 conduction test,
 Nu_kinetic is assigned its conduction limit 1 (the finite-Ra formula is singular).
 
-Output under `output/rayleigh_benard/RUN_ID/`:
+Single-case output remains under `output/rayleigh_benard/RUN_ID/` by default.
+The production driver relocates raw HDF5 via `--hdf5-root`; local run directories
+contain a `hdf5` link for existing readers. Production history copies reside in
+that HDF5 run directory under `checkpoint_history/`. Dataset contents:
 
-- `metadata.txt`: grid, physics, relaxation, storage/velocity convention, schedule.
-- `rbc_timeseries.csv`: five Nus, moments, RMS, energy/dissipation, Nu(z) range,
-  effective thermal-layer thickness, minimum eta, maximum speed, mean density.
-- `rbc_profiles.csv`: time-averaged plane profiles, fluxes, RMS, dissipation and eta.
-- `rbc_convergence.csv`: Welford scalar means/stddev and **uncorrelated** standard
-  errors (clearly labeled `naive_stderr`; use post-processing for correlated data).
-- `checkpoints/step_*.chk`: versioned raw solver state, exact schedule, all FP64
-  accumulated profiles, Kahan compensation, Welford state and sample counters.
+- `metadata.h5:/metadata`: grid, physics, relaxation, storage/velocity convention and schedules.
+- `statistics.h5:/statistics/timeseries`: five Nus, moments, RMS, energy/dissipation,
+  Nu(z) range, layer thickness, minimum eta, maximum speed and mean density.
+- `/statistics/profiles`: averaged plane profiles, fluxes, RMS, dissipation and eta.
+- `/statistics/convergence`: Welford means/stddev and **uncorrelated** errors,
+  labeled `naive_stderr`; `/statistics/runtime` records sustained throughput/ETA.
+- `fields/step_*.h5` and `slices/step_*.h5`: independently scheduled physical fields.
+- `checkpoints/step_*.chk`: unchanged versioned solver state, exact schedule,
+  all FP64 accumulators, Kahan compensation, Welford state and sample counters.
+- Closed HDF5 histories pair with checkpoints; they reside in `checkpoint_history/`
+  under an external HDF5 root, or the legacy `checkpoints/` for co-located output.
+
+Processed diagnostics, plots and reports use `results/<original_run_id>/`.
+See [the production guide](production-rbc.md) for the complete HDF5 schema,
+retention, transaction semantics, schedules and storage calculations.
 
 Checkpoint writes use a temporary file and atomic rename. Restart rejects old
 full-moment binaries, incompatible grids/physics/precision/RR/schedules and
@@ -180,10 +194,10 @@ The version-2 format uses the native host ABI and endianness, not a portable arc
 
 ## Post-processing and comparisons
 
-Requires NumPy and Matplotlib:
+Requires NumPy, Matplotlib and h5py:
 
 ```bash
-python3 postRayleigh.py all output/rayleigh_benard/short_rr3 --out output/plots
+python3 postRayleigh.py all output/rayleigh_benard/short_rr3 --out results
 python3 postRayleigh.py scaling output/rayleigh_benard/rbc{1,2,3}_n*_rr3
 python3 postRayleigh.py grid output/rayleigh_benard/rbc4_n*_rr3
 ```

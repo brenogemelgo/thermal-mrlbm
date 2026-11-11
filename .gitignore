@@ -1,4 +1,6 @@
 /output/
 /build/
+/results/
+/output_hdf5/
 __pycache__/
 *.pyc

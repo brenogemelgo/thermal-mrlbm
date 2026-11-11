@@ -37,28 +37,39 @@ struct SliceOutput
 {
     double *device=nullptr;
     std::vector<double> host=std::vector<double>(SLICE_CHANNELS*SLICE_CELLS);
-    SliceOutput() {outputCheckCuda(cudaMalloc(&device,host.size()*sizeof(double)),"validation slice allocation");}
+    SliceOutput()
+    {
+        if(!moment_io::distributed())
+            outputCheckCuda(cudaMalloc(&device,host.size()*sizeof(double)),"validation slice allocation");
+    }
     ~SliceOutput() {cudaFree(device);}
     void save(const real_t *now,const real_t *old,natural_t step)
     {
-        extractSlice<<<dim3((NX+127)/128,NZ),128>>>(now,old,device);
-        outputCheckCuda(cudaGetLastError(),"extract validation slice");
-        outputCheckCuda(cudaMemcpy(host.data(),device,host.size()*sizeof(double),cudaMemcpyDeviceToHost),"copy validation slice");
-        const auto dir=getSimulationOutputDirectory()/"validation";
+        if(moment_io::distributed()) moment_io::distributed()->validation(host.data(),now,old);
+        else
+        {
+            extractSlice<<<dim3((NX+127)/128,NZ),128>>>(now,old,device);
+            outputCheckCuda(cudaGetLastError(),"extract validation slice");
+            outputCheckCuda(cudaMemcpy(host.data(),device,host.size()*sizeof(double),cudaMemcpyDeviceToHost),"copy validation slice");
+        }
+        const auto dir=getSimulationHdf5Directory()/"validation";
         std::filesystem::create_directories(dir);
         const auto base=dir/("snapshot_"+std::to_string(step));
-        auto bin=base;bin+=".bin";auto tmp=bin;tmp+=".tmp";
-        std::ofstream out(tmp,std::ios::binary);
-        out.write(reinterpret_cast<const char *>(host.data()),host.size()*sizeof(double));out.close();
-        if(!out) throw std::runtime_error("validation slice write failed");
-        std::filesystem::rename(tmp,bin);
-        auto meta=base;meta+=".json";auto mt=meta;mt+=".tmp";
-        std::ofstream j(mt);
-        j<<"{\"schema\":1,\"case\":\"V"<<KIND<<"\",\"step\":"<<step
-         <<",\"previous_step\":"<<(step ? step-1 : 0)<<",\"nx\":"<<NX<<",\"nz\":"<<NZ
-         <<",\"channels\":"<<SLICE_CHANNELS<<",\"dtype\":\"native_float64\"}\n";
-        j.close();if(!j) throw std::runtime_error("validation slice manifest write failed");
-        std::filesystem::rename(mt,meta); // manifest is the commit record
+        auto path=base;path+=".h5";auto tmp=path;tmp+=".tmp";
+        {
+            h5out::Handle file(H5Fcreate(tmp.c_str(),H5F_ACC_TRUNC,H5P_DEFAULT,H5P_DEFAULT),H5Fclose);
+            h5out::attribute(file,"schema","1");
+            h5out::attribute(file,"case","V"+std::to_string(KIND));
+            h5out::attribute(file,"step",std::to_string(step));
+            h5out::attribute(file,"previous_step",std::to_string(step ? step-1 : 0));
+            h5out::attribute(file,"nx",std::to_string(NX));h5out::attribute(file,"nz",std::to_string(NZ));
+            h5out::attribute(file,"channels",std::to_string(SLICE_CHANNELS));
+            h5out::Handle data(h5out::dataset(file,"moments",H5T_IEEE_F64LE,{SLICE_CHANNELS,NZ,NX},
+                {1,std::min(64u,NZ),std::min(128u,NX)}),H5Dclose);
+            h5out::check(H5Dwrite(data,H5T_NATIVE_DOUBLE,H5S_ALL,H5S_ALL,H5P_DEFAULT,host.data()));
+            h5out::flush(file);
+        }
+        std::filesystem::rename(tmp,path);
     }
 };
 }

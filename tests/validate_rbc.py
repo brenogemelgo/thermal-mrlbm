@@ -13,8 +13,9 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 sys.path.insert(0, str(ROOT))
-from run_rbc import CASES, parameters
-from postRayleigh import block_errors, uncertainty
+from run_rbc import CASES, parameters, hdf5_flags
+from postRayleigh import block_errors, uncertainty, load
+import h5py
 
 
 def command(cmd, cwd=ROOT, expect=0):
@@ -29,7 +30,7 @@ def build(work, name, source='src/main.cu', **defs):
     exe = work/name
     command(['nvcc', '-std=c++20', '-O2', '--expt-relaxed-constexpr', '--extended-lambda',
              '-arch='+os.environ.get('CUDA_ARCH', 'sm_86'), '-DCASE_RAYLEIGH_BENARD',
-             *[f'-D{k}={v}' for k, v in defs.items()], ROOT/source, '-o', exe])
+             *[f'-D{k}={v}' for k, v in defs.items()], ROOT/source, '-o', exe, *hdf5_flags()])
     return exe
 
 
@@ -47,10 +48,13 @@ def main():
             assert np.isclose(q['gbeta']*q['H']**3/(q['nu']*q['kappa']), q['Ra'])
             assert np.isclose(q['nu']/q['kappa'], q['Pr'])
             assert q['tau'] > .5 and q['tau_thermal'] > .5
-    results['tests']['all_12_parameter_sets'] = 'PASS'
+    results['tests']['all_parameter_sets'] = 'PASS'
     # Algebraic CPU quadrature plus GPU plate reconstruction, both with and without forcing.
     unit = build(work, 'moments-forced', 'tests/moments.cu', RBC_N=12)
     command([unit], cwd=work)
+    fringe = build(work, 'moments-fringe', 'tests/moments.cu', RBC_N=7)
+    command([fringe], cwd=work)
+    results['tests']['fused_boundary_fringe_ownership'] = 'PASS (N=7,12; poisoned output and exact NEE projection)'
     errors = []
     flux_errors = []
     shear_errors = []
@@ -74,13 +78,13 @@ def main():
         rid = f'conduction-rr{rr}'
         command([exe, '--runId', rid, '--steps', 200, '--checkpoint-every', 100], cwd=work)
         run = work/'output/rayleigh_benard'/rid
-        data = np.genfromtxt(run/'rbc_timeseries.csv', names=True, delimiter=',')
+        data = load(run, 'rbc_timeseries.csv')
         for field in ['nu_bottom', 'nu_top', 'nu_volume', 'nu_kinetic', 'nu_thermal']:
             assert np.max(np.abs(data[field]-1)) < 3e-5, (field, data[field])
         assert np.max(np.abs(data['max_velocity'])) < 1e-6
         runs.append(run)
-    p2 = np.genfromtxt(runs[0]/'rbc_profiles.csv', names=True, delimiter=',')
-    p3 = np.genfromtxt(runs[1]/'rbc_profiles.csv', names=True, delimiter=',')
+    p2 = load(runs[0], 'rbc_profiles.csv')
+    p3 = load(runs[1], 'rbc_profiles.csv')
     np.testing.assert_array_equal(p2['temperature'], p3['temperature'])
     results['tests']['conduction_all_five_nu_and_rr_limits'] = 'PASS (<3e-5)'
     # A short finite-Ra run, restart inside the averaging window, and corrupted data rejection.
@@ -89,12 +93,17 @@ def main():
     command([exe, '--runId', 'split', '--steps', 100, '--checkpoint-every', 100], cwd=work)
     # Simulate rows written after an older checkpoint, as in interrupted output.
     split = work/'output/rayleigh_benard/split'
-    with (split/'rbc_timeseries.csv').open('a') as out:
-        out.write('999999,0,0\n')
+    with h5py.File(split/'statistics.h5', 'r+') as out:
+        table = out['statistics/timeseries']
+        rows, cols = table.shape
+        table.resize((rows+1, cols))
+        table[rows] = np.zeros(cols)
+        table[rows, 0] = 999999
     command([exe, '--runId', 'split', '--steps', 300, '--continue'], cwd=work)
     full = work/'output/rayleigh_benard/full'
-    for name in ['checkpoints/step_000000300.chk', 'rbc_profiles.csv', 'rbc_timeseries.csv', 'rbc_convergence.csv']:
-        assert (full/name).read_bytes() == (split/name).read_bytes(), name
+    assert (full/'checkpoints/step_000000300.chk').read_bytes() == (split/'checkpoints/step_000000300.chk').read_bytes()
+    for name in ['rbc_profiles.csv', 'rbc_timeseries.csv', 'rbc_convergence.csv']:
+        np.testing.assert_array_equal(load(full, name), load(split, name))
     results['tests']['restart_bitwise_and_series_rollback'] = 'PASS'
     chk = split/'checkpoints/step_000000300.chk'
     original = chk.read_bytes()
@@ -112,7 +121,7 @@ def main():
         rid = exe.name
         command([exe, '--runId', rid, '--steps', 200, '--checkpoint-every', 200], cwd=work)
         run = work/'output/rayleigh_benard'/rid
-        data = np.genfromtxt(run/'rbc_timeseries.csv', names=True, delimiter=',')
+        data = load(run, 'rbc_timeseries.csv')
         for name in data.dtype.names:
             if name != 'eta_min':
                 assert np.all(np.isfinite(data[name])), (rid, name)
@@ -133,7 +142,7 @@ def main():
     results['tests']['plots_and_correlation_aware_reports'] = 'PASS'
     # The preserved jet boundary code must compile against the changed moment policy.
     command(['nvcc', '-std=c++20', '-O2', '--expt-relaxed-constexpr', '--extended-lambda',
-             '-arch='+os.environ.get('CUDA_ARCH', 'sm_86'), '-DCASE_JET', ROOT/'src/main.cu', '-o', work/'jet'])
+             '-arch='+os.environ.get('CUDA_ARCH', 'sm_86'), '-DCASE_JET', ROOT/'src/main.cu', '-o', work/'jet', *hdf5_flags()])
     results['tests']['jet_compile'] = 'PASS'
     (work/'validation.json').write_text(json.dumps(results, indent=2)+'\n')
     print(json.dumps(results, indent=2))

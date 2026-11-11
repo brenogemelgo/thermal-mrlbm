@@ -161,25 +161,25 @@ cannot detect.
   orders for V3. V1/V2/V4/V5 retain RR3. Repeat the same order selection on resume.
 - `--resume` skips completed simulation work and post-processes its output;
   interrupted simulations rebuild through the existing launcher and load the
-  latest committed checkpoint. A partial attempt without a checkpoint restarts
-  from its initial condition only when `--resume` is explicitly supplied.
+  latest committed checkpoint. An interrupted run without a committed checkpoint
+  must be preserved under its original output root; choose a new root for a fresh attempt.
 - `--post-only` neither builds nor runs simulations. It requires a successful
   simulation receipt for each selected job and regenerates its analysis.
 - `--checkpoint-every STEPS` overrides all checkpoint intervals. Defaults are
   approximately four checkpoints per analytical run and every 10 tff for RBC.
 - Run IDs are deterministic, for example `validation1_v3_n064_rr3_double`.
-  Each test has a separate output tree. A manifest mismatch or an unowned output
-  directory stops the campaign. Use another `--root` for changed settings.
+  Run IDs encode the test/grid/order/precision. A manifest mismatch or unowned
+  directory stops the campaign. Use separate `--root`, `--output-root` and
+  `--results-root` for changed configurations.
 - A fresh invocation refuses existing owned runs rather than overwriting them.
   A file lock prevents simultaneous drivers from mutating one campaign tree.
 - A completed simulation receipt is committed only after a successful solver
   return and the final checkpoint. It survives post-processing failures.
   Per-run logs append new attempts. The driver stops on build, simulation,
   post-processing, or failed numerical checks, and retains all successful output.
-- Analytical snapshot JSON manifests commit their corresponding binary slices.
-  Post-processing ignores snapshots beyond the target end step; partial snapshots
-  have no committed manifest. Restart replaces rerun diagnostic samples at the
-  same step, with the existing statistics/checkpoint rollback behavior preserved.
+- Analytical snapshots commit through atomic HDF5 file rename. Legacy binary/JSON
+  slices remain readable. Restart replays snapshots and time-series samples beyond
+  the committed checkpoint and preserves the original statistical accumulators.
 
 Do not run two native binaries writing the same run ID outside the campaign lock.
 Production checkpoint ABI is preserved. A validation-physics tag in the existing
@@ -190,31 +190,33 @@ resuming incompatible accumulators.
 
 ## Output and numerical assessments
 
-Default root: `output/rbc_validation/`.
+Campaign state defaults to `output/rbc_validation_state/`. Raw numerical data
+and processed results use separate roots:
 
 ```
-V1/rayleigh_benard/validation1_v1_n016_rr3_double/
-    validation_run.json          # immutable expected configuration
-    simulation_complete.json    # successful solver receipt
-    metadata.txt
-    checkpoints/step_*.chk
-    rbc_timeseries.csv, rbc_profiles.csv, rbc_convergence.csv
-    validation/snapshot_STEP.{bin,json}
-    execution.log, postprocess.log
-V1/post/validation1_v1_n016_rr3_double/
-    validation_result.json, checks.csv
-    analytical_history.csv, analytical_profiles.csv
-    conduction_nusselt.csv
-    *.pdf, *.png
-summary/
-    campaign_summary.{json,csv,md}
-    campaign_checks.csv
-    spatial_convergence.csv
-    rbc_grid_differences.csv
-    rr2_rr3_comparison.csv
-    *.pdf, *.png
-campaign_state.json
+output/rayleigh_benard/validation1_v1_n016_rr3_double/
+    validation_run.json, simulation_complete.json
+    metadata.h5, statistics.h5
+    checkpoints/step_*.chk, checkpoints/statistics_step_*.h5
+    validation/snapshot_STEP.h5
+    execution.log
+results/validation1_v1_n016_rr3_double/
+    validation_result.json, checks.h5
+    analytical_history.h5, analytical_profiles.h5
+    conduction_nusselt.h5
+    postprocess.log, *.pdf, *.png
+results/rbc_validation_summary/
+    campaign_summary.{json,h5,md}, campaign_checks.h5
+    spatial_convergence.h5, rbc_grid_differences.h5
+    rr2_rr3_comparison.h5, *.pdf, *.png
 ```
+
+HDF5 replaces numerical CSV and packed validation-slice output. Derived tables
+use `/columns/<column_name>` datasets; metadata/report JSON remains human readable.
+The HDF5 schema, history-copy recovery and legacy restart migration are documented
+in [the production output guide](production-rbc.md). Legacy campaigns remain
+readable in their existing directories and are not moved or deleted automatically.
+
 
 V2 additionally plots recovered diffusivity and advection-sensitive PDE
 residuals. V3 plots velocity, viscous stress and force consistency. Each
@@ -226,8 +228,8 @@ additional O(N³) fields. Norm integration uses periodic X and half-weight wall
 planes. Full-field export is not enabled by the campaign.
 
 V4/V5 reuse all existing `postRayleigh.py` convergence/profile plots and numerical
-reports. They add `nusselt_confidence.csv`, conditional 95% batch-bootstrap
-intervals, and `nusselt_bootstrap.npz`. Block length is at least twice the estimated
+reports. They add `nusselt_confidence.h5`, conditional 95% batch-bootstrap
+intervals, and `nusselt_bootstrap.h5`. Block length is at least twice the estimated
 integral correlation time, with at least eight complete blocks before an interval
 is produced. The incomplete trailing block is omitted for variance estimation;
 bootstrap draws are centered on the full-record mean. A fixed per-run/estimator hash seeds resampling reproducibly. These
@@ -256,13 +258,13 @@ Standalone analysis, without rebuilding or rerunning a simulation:
 
 ```bash
 python3 postRayleigh.py validation \
-  output/rbc_validation/V3/rayleigh_benard/validation1_v3_n064_rr3_double \
-  --out output/rbc_validation/V3/post
-python3 postRayleigh.py validation-summary output/rbc_validation \
-  --out output/rbc_validation/summary
+  output/rayleigh_benard/validation1_v3_n064_rr3_double \
+  --out results
+python3 postRayleigh.py validation-summary output/rbc_validation_state \
+  --out results
 ```
 
-Python analysis requires NumPy and Matplotlib. No Python reference imports solver
+Python analysis requires NumPy, Matplotlib and h5py. No Python reference imports solver
 physics or numerical-kernel code. The source and execution interfaces have only
 been inspected as text for this implementation; no compilation, test, campaign,
 simulation or post-processing invocation was performed.

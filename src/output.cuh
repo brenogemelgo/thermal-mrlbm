@@ -2,6 +2,10 @@
 
 #include "D3Q7.cuh"
 #include "deviceFunctions.cuh"
+#include "reconstruction.cuh"
+#include "hdf5Output.cuh"
+#include "hostMomentIO.cuh"
+#include <memory>
 
 #include <cctype>
 #include <cstdint>
@@ -65,18 +69,6 @@ static inline const char *outputMomentName(const natural_t field)
     }
 }
 
-static inline const char *outputVtkRealType()
-{
-    if constexpr (std::is_same_v<real_t, float>)
-    {
-        return "Float32";
-    }
-    else
-    {
-        return "Float64";
-    }
-}
-
 static inline std::string outputStepName(const natural_t step)
 {
     std::ostringstream name;
@@ -117,25 +109,54 @@ static inline std::filesystem::path getSimulationOutputDirectory()
     return simulationOutputRoot() / outputCaseFolderName() / simulationRunId();
 }
 
-static inline std::filesystem::path getBinaryOutputDirectory()
+// Empty means the legacy co-located layout, or an existing per-run data link.
+static inline std::filesystem::path &simulationHdf5Root()
 {
-    return getSimulationOutputDirectory() / "binaries";
+    static std::filesystem::path root;
+    return root;
+}
+static inline std::filesystem::path getSimulationHdf5Directory()
+{
+    if (!simulationHdf5Root().empty())
+        return simulationHdf5Root() / outputCaseFolderName() / simulationRunId();
+    const auto link = getSimulationOutputDirectory() / "hdf5";
+    return std::filesystem::is_symlink(link) || std::filesystem::is_directory(link)
+        ? link : getSimulationOutputDirectory();
 }
 
-static inline std::filesystem::path getVtiOutputDirectory()
+struct OutputSchedule
 {
-    return getSimulationOutputDirectory() / "vtis";
-}
-
-static inline std::filesystem::path getMetadataPath()
+    natural_t slices = 0, fields = 0, profiles = 0, progress = 0, start = 0, keepCheckpoints = 0;
+    natural_t checkpoints = STAMP, end = NSTEPS;
+    bool sliceVelocity = false;
+};
+static inline OutputSchedule &outputSchedule()
 {
-    return getSimulationOutputDirectory() / "metadata.txt";
+    static OutputSchedule value;
+    return value;
 }
-
+static inline std::filesystem::path statisticsPath() { return getSimulationHdf5Directory() / "statistics.h5"; }
+static inline std::filesystem::path getMetadataPath() { return getSimulationHdf5Directory() / "metadata.h5"; }
+static inline std::filesystem::path canonicalOutputPath(const std::filesystem::path &path)
+{
+    return std::filesystem::weakly_canonical(std::filesystem::absolute(path));
+}
 static inline void createOutputDirectories()
 {
-    std::filesystem::create_directories(getBinaryOutputDirectory());
-    std::filesystem::create_directories(getVtiOutputDirectory());
+    const auto control = canonicalOutputPath(getSimulationOutputDirectory());
+    const auto data = canonicalOutputPath(getSimulationHdf5Directory());
+    std::filesystem::create_directories(control);
+    std::filesystem::create_directories(data);
+    if (control != data)
+    {
+        const auto link = control / "hdf5";
+        if (std::filesystem::exists(link) || std::filesystem::is_symlink(link))
+        {
+            if (!std::filesystem::is_symlink(link) || canonicalOutputPath(link) != data)
+                throw std::runtime_error("run already points to a different HDF5 location");
+        }
+        else std::filesystem::create_directory_symlink(data, link);
+    }
 }
 
 static inline void writeMetadata(
@@ -143,12 +164,7 @@ static inline void writeMetadata(
 {
     createOutputDirectories();
 
-    std::ofstream out(getMetadataPath());
-    if (!out)
-    {
-        std::cerr << "Could not open metadata output: " << getMetadataPath() << std::endl;
-        std::exit(EXIT_FAILURE);
-    }
+    std::ostringstream out;
 
     out << std::boolalpha << std::setprecision(17);
     out << "caseName = " << ActiveCase::NAME << '\n';
@@ -201,7 +217,7 @@ static inline void writeMetadata(
     out << "validation_channel_re = " << ActiveCase::CHANNEL_RE << '\n';
     out << "validation_time_scale = diffusive\n";
     out << "validation_source_scheme = trapezoidal_zeroth_moment\n";
-    out << "validation_velocity = " << (RBC_VALIDATION_CASE==2 ? "prescribed" : "solved") << '\n';
+    out << "validation_velocity = " << (RBC_VALIDATION_CASE == 2 ? "prescribed" : "solved") << '\n';
 #endif
 
 #if defined(CASE_RAYLEIGH_BENARD)
@@ -240,209 +256,155 @@ static inline void writeMetadata(
     out << "T_AMBIENT = " << static_cast<double>(ActiveCase::T_AMBIENT) << '\n';
     out << "DELTA_T = " << static_cast<double>(ActiveCase::DELTA_T) << '\n';
 #endif
-}
-
-static inline void initializeOutputLayout()
-{
-    createOutputDirectories();
-    writeMetadata();
-}
-
-static inline void writeBinary(
-    const real_t *deviceMoments,
-    const std::filesystem::path &path)
-{
-    std::ofstream out(path, std::ios::binary);
-    if (!out)
+    out << "output_schema = thermal-mrlbm-hdf5-v1\n";
+    out << "hdf5_directory = " << canonicalOutputPath(getSimulationHdf5Directory()).string() << '\n';
+    out << "vti_enabled = false\n";
+    out << "gpu_count = " << (moment_io::distributed() ? moment_io::distributed()->physicalDeviceCount() : 1) << '\n';
+    out << "partition_slabs = " << (moment_io::distributed() ? 2 : 1) << '\n';
+    out << "partition_axis = " << (moment_io::distributed() ? "z" : "none") << '\n';
+    out << "halo_transport = " << (moment_io::distributed() ? moment_io::distributed()->transportName() : "none") << '\n';
+    if (moment_io::distributed()) out << "gpu_devices = " << moment_io::distributed()->deviceNames() << '\n';
+    out << "run_id = " << simulationRunId() << '\n';
+    out << "field_velocity_convention = physical_u\n";
+    out << "slice_every = " << outputSchedule().slices << '\n';
+    out << "field_every = " << outputSchedule().fields << '\n';
+    out << "profile_every = " << outputSchedule().profiles << '\n';
+    out << "progress_every = " << outputSchedule().progress << '\n';
+    out << "checkpoint_every = " << outputSchedule().checkpoints << '\n';
+    out << "requested_end_step = " << outputSchedule().end << '\n';
+    out << "output_start = " << outputSchedule().start << '\n';
+    out << "keep_checkpoints = " << outputSchedule().keepCheckpoints << '\n';
+    out << "slice_fields = " << (outputSchedule().sliceVelocity ? "temperature,uz" : "temperature") << '\n';
+    out << "compression = " << h5out::compression() << '\n';
+    auto temp = getMetadataPath();
+    temp += ".tmp";
     {
-        std::cerr << "Could not open binary output: " << path << std::endl;
-        std::exit(EXIT_FAILURE);
-    }
-
-    std::vector<real_t> fieldData(CELLS);
-
-    for (natural_t field = 0; field < NUM_MOMENTS; ++field)
-    {
-        outputCheckCuda(
-            cudaMemcpy(fieldData.data(), deviceMoments + CELLS * field, CELLS * sizeof(real_t), cudaMemcpyDeviceToHost),
-            "cudaMemcpy binary field");
-
-
-        out.write(reinterpret_cast<const char *>(fieldData.data()), static_cast<std::streamsize>(CELLS * sizeof(real_t)));
-        if (!out)
+        h5out::Handle file(H5Fcreate(temp.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT), H5Fclose);
+        h5out::Handle group(h5out::group(file, "metadata"), H5Gclose);
+        std::istringstream lines(out.str());
+        std::string line;
+        auto trim = [](std::string s)
+        {const auto a=s.find_first_not_of(" ");return a==s.npos ? std::string() : s.substr(a,s.find_last_not_of(" ")-a+1); };
+        while (std::getline(lines, line))
         {
-            std::cerr << "Could not write binary output: " << path << std::endl;
-            std::exit(EXIT_FAILURE);
+            const auto eq = line.find('=');
+            if (eq == line.npos)
+                continue;
+            h5out::attribute(group, trim(line.substr(0, eq)), trim(line.substr(eq + 1)));
         }
+        h5out::flush(file);
     }
+    std::filesystem::rename(temp, getMetadataPath());
 }
 
-static inline void writeVti(
-    const std::filesystem::path &binaryPath,
-    const std::filesystem::path &vtiPath)
+// One XY slab (or one XZ slice), all X accesses contiguous. Output velocities
+// use the same buffer-time force subtraction as the production statistics.
+__global__ void extractOutputPlane(const real_t *m, real_t *packed, natural_t index, bool xz, natural_t step)
 {
-    std::ifstream bin(binaryPath, std::ios::binary);
-    if (!bin)
+    const natural_t q = blockIdx.x * blockDim.x + threadIdx.x;
+    const size_t plane = xz ? size_t(NX) * NZ : size_t(NX) * NY;
+    if (q >= plane)
+        return;
+    const natural_t x = q % NX, y = xz ? index : q / NX, z = xz ? q / NX : index;
+    const natural_t i = global3(x, y, z);
+    const real_t t = loadMoment(m, i, TEMP);
+    real_t a[3];
+    nodeAcceleration(t, x, y, z, step, a);
+    packed[q] = t;
+    for (int f = 0; f < 3; ++f)
+        packed[size_t(f + 1) * plane + q] = loadMoment(m, i, UX + f) - a[f] / 2;
+}
+struct FieldOutput
+{
+    real_t *device = nullptr;
+    std::vector<real_t> host;
+    void allocate()
     {
-        std::cerr << "Could not open binary input for VTI: " << binaryPath << std::endl;
-        std::exit(EXIT_FAILURE);
+        if (device)
+            return;
+        host.resize(4 * size_t(NX) * std::max(NY, NZ));
+        outputCheckCuda(cudaMalloc(&device, host.size() * sizeof(real_t)), "output slab allocation");
     }
-
-    std::ofstream vti(vtiPath, std::ios::binary);
-    if (!vti)
+    ~FieldOutput()
     {
-        std::cerr << "Could not open VTI output: " << vtiPath << std::endl;
-        std::exit(EXIT_FAILURE);
+        if (device)
+            cudaFree(device);
     }
-
-    constexpr std::uint64_t fieldBytes = static_cast<std::uint64_t>(CELLS) * static_cast<std::uint64_t>(sizeof(real_t));
-    std::uint64_t offset = 0;
-
-    vti << "<?xml version=\"1.0\"?>\n";
-    vti << "<VTKFile type=\"ImageData\" version=\"1.0\" byte_order=\"LittleEndian\" header_type=\"UInt64\">\n";
-    vti << "  <ImageData WholeExtent=\"0 " << (NX - 1) << " 0 " << (NY - 1) << " 0 " << (NZ - 1)
-        << "\" Origin=\"0 0 0\" Spacing=\"1 1 1\">\n";
-    vti << "    <Piece Extent=\"0 " << (NX - 1) << " 0 " << (NY - 1) << " 0 " << (NZ - 1) << "\">\n";
-    vti << "      <PointData Scalars=\"rho\">\n";
-
-    for (natural_t field = 0; field < NUM_MOMENTS; ++field)
+    void save(const real_t *m, natural_t step, bool slice)
     {
-        vti << "        <DataArray type=\"" << outputVtkRealType() << "\" Name=\"" << outputMomentName(field)
-            << "\" NumberOfComponents=\"1\" format=\"appended\" offset=\"" << offset << "\"/>\n";
-        offset += sizeof(std::uint64_t) + fieldBytes;
-    }
-
-    vti << "      </PointData>\n";
-    vti << "      <CellData/>\n";
-    vti << "    </Piece>\n";
-    vti << "  </ImageData>\n";
-    vti << "  <AppendedData encoding=\"raw\">\n_";
-
-    std::vector<real_t> fieldData(CELLS);
-    for (natural_t field = 0; field < NUM_MOMENTS; ++field)
-    {
-        bin.read(reinterpret_cast<char *>(fieldData.data()), static_cast<std::streamsize>(fieldBytes));
-        if (!bin)
+        if (moment_io::distributed())
+            host.resize(4 * size_t(NX) * std::max(NY, NZ));
+        else allocate();
+        const auto dir = getSimulationHdf5Directory() / (slice ? "slices" : "fields");
+        std::filesystem::create_directories(dir);
+        const auto path = dir / (outputStepName(step) + ".h5");
+        auto tmp = path;
+        tmp += ".tmp";
+        const hid_t memType = sizeof(real_t) == 4 ? H5T_NATIVE_FLOAT : H5T_NATIVE_DOUBLE;
+        const hid_t diskType = sizeof(real_t) == 4 ? H5T_IEEE_F32LE : H5T_IEEE_F64LE;
         {
-            std::cerr << "Could not read binary field for VTI: " << binaryPath << std::endl;
-            std::exit(EXIT_FAILURE);
+            h5out::Handle file(H5Fcreate(tmp.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT), H5Fclose);
+            h5out::attribute(file, "step", std::to_string(step));
+            h5out::attribute(file, "run_id", simulationRunId());
+            h5out::attribute(file, "velocity_convention", "physical_u");
+            h5out::attribute(file, "axis_order", slice ? "zx" : "zyx");
+            h5out::attribute(file, "lattice_spacing", "1");
+            h5out::attribute(file, "wall_nodes", "0,NZ-1");
+            if (slice)
+                h5out::attribute(file, "y_index", std::to_string(NY / 2));
+            h5out::Handle group(h5out::group(file, "fields"), H5Gclose);
+            const char *names[] = {"temperature", "ux", "uy", "uz"};
+            std::vector<std::unique_ptr<h5out::Handle>> datasets;
+            const std::vector<hsize_t> dims = slice ? std::vector<hsize_t>{NZ, NX} : std::vector<hsize_t>{NZ, NY, NX};
+            const std::vector<hsize_t> chunks = slice ? std::vector<hsize_t>{std::min(64u, NZ), std::min(128u, NX)} : std::vector<hsize_t>{1, std::min(64u, NY), std::min(128u, NX)};
+            for (int f = 0; f < 4; ++f)
+                if (!slice || f == 0 || (outputSchedule().sliceVelocity && f == 3))
+                    datasets.emplace_back(new h5out::Handle(h5out::dataset(group, names[f], diskType, dims, chunks), H5Dclose));
+            const size_t plane = size_t(NX) * (slice ? NZ : NY);
+            for (natural_t z = 0; z < (slice ? 1u : NZ); ++z)
+            {
+                if (moment_io::distributed())
+                {
+                    moment_io::distributed()->extract(host.data(), m, slice ? NY / 2 : z, slice, step);
+                }
+                else
+                {
+                    extractOutputPlane<<<(plane + 255) / 256, 256>>>(m, device, slice ? NY / 2 : z, slice, step);
+                    outputCheckCuda(cudaGetLastError(), "extract output plane");
+                    outputCheckCuda(cudaMemcpy(host.data(), device, 4 * plane * sizeof(real_t), cudaMemcpyDeviceToHost), "copy output plane");
+                }
+                int d = 0;
+                for (int f = 0; f < 4; ++f)
+                    if (!slice || f == 0 || (outputSchedule().sliceVelocity && f == 3))
+                    {
+                        if (slice)
+                            h5out::slab(*datasets[d++], memType, host.data() + f * plane, {0, 0}, {NZ, NX});
+                        else
+                            h5out::slab(*datasets[d++], memType, host.data() + f * plane, {z, 0, 0}, {1, NY, NX});
+                    }
+            }
+            h5out::flush(file);
         }
-
-        vti.write(reinterpret_cast<const char *>(&fieldBytes), sizeof(fieldBytes));
-        vti.write(reinterpret_cast<const char *>(fieldData.data()), static_cast<std::streamsize>(fieldBytes));
-        if (!vti)
+        std::filesystem::rename(tmp, path);
+    }
+};
+static inline void writeScalarOutput(const real_t *deviceField, const char *name)
+{
+    const auto path = getSimulationHdf5Directory() / (std::string(name) + ".h5");
+    auto tmp = path;
+    tmp += ".tmp";
+    {
+        h5out::Handle file(H5Fcreate(tmp.c_str(), H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT), H5Fclose);
+        const hid_t mem = sizeof(real_t) == 4 ? H5T_NATIVE_FLOAT : H5T_NATIVE_DOUBLE;
+        const hid_t disk = sizeof(real_t) == 4 ? H5T_IEEE_F32LE : H5T_IEEE_F64LE;
+        h5out::Handle data(h5out::dataset(file, name, disk, {NZ, NY, NX}, {1, std::min(64u, NY), std::min(128u, NX)}), H5Dclose);
+        std::vector<real_t> plane(size_t(NX) * NY);
+        for (natural_t z = 0; z < NZ; ++z)
         {
-            std::cerr << "Could not write VTI output: " << vtiPath << std::endl;
-            std::exit(EXIT_FAILURE);
+            outputCheckCuda(cudaMemcpy(plane.data(), deviceField + size_t(z) * plane.size(), plane.size() * sizeof(real_t), cudaMemcpyDeviceToHost), "scalar plane");
+            h5out::slab(data, mem, plane.data(), {z, 0, 0}, {1, NY, NX});
         }
+        h5out::flush(file);
     }
-
-    vti << "\n  </AppendedData>\n";
-    vti << "</VTKFile>\n";
-}
-
-static inline void writeScalarBinary(
-    const real_t *deviceField,
-    const std::filesystem::path &path)
-{
-    std::ofstream out(path, std::ios::binary);
-    if (!out)
-    {
-        std::cerr << "Could not open scalar binary output: " << path << std::endl;
-        std::exit(EXIT_FAILURE);
-    }
-
-    std::vector<real_t> fieldData(CELLS);
-    outputCheckCuda(
-        cudaMemcpy(fieldData.data(), deviceField, CELLS * sizeof(real_t), cudaMemcpyDeviceToHost),
-        "cudaMemcpy scalar binary field");
-
-    out.write(reinterpret_cast<const char *>(fieldData.data()), static_cast<std::streamsize>(CELLS * sizeof(real_t)));
-    if (!out)
-    {
-        std::cerr << "Could not write scalar binary output: " << path << std::endl;
-        std::exit(EXIT_FAILURE);
-    }
-}
-
-static inline void writeScalarVti(
-    const std::filesystem::path &binaryPath,
-    const std::filesystem::path &vtiPath,
-    const char *fieldName)
-{
-    std::ifstream bin(binaryPath, std::ios::binary);
-    if (!bin)
-    {
-        std::cerr << "Could not open scalar binary input for VTI: " << binaryPath << std::endl;
-        std::exit(EXIT_FAILURE);
-    }
-
-    std::ofstream vti(vtiPath, std::ios::binary);
-    if (!vti)
-    {
-        std::cerr << "Could not open scalar VTI output: " << vtiPath << std::endl;
-        std::exit(EXIT_FAILURE);
-    }
-
-    constexpr std::uint64_t fieldBytes = static_cast<std::uint64_t>(CELLS) * static_cast<std::uint64_t>(sizeof(real_t));
-
-    vti << "<?xml version=\"1.0\"?>\n";
-    vti << "<VTKFile type=\"ImageData\" version=\"1.0\" byte_order=\"LittleEndian\" header_type=\"UInt64\">\n";
-    vti << "  <ImageData WholeExtent=\"0 " << (NX - 1) << " 0 " << (NY - 1) << " 0 " << (NZ - 1)
-        << "\" Origin=\"0 0 0\" Spacing=\"1 1 1\">\n";
-    vti << "    <Piece Extent=\"0 " << (NX - 1) << " 0 " << (NY - 1) << " 0 " << (NZ - 1) << "\">\n";
-    vti << "      <PointData Scalars=\"" << fieldName << "\">\n";
-    vti << "        <DataArray type=\"" << outputVtkRealType() << "\" Name=\"" << fieldName
-        << "\" NumberOfComponents=\"1\" format=\"appended\" offset=\"0\"/>\n";
-    vti << "      </PointData>\n";
-    vti << "      <CellData/>\n";
-    vti << "    </Piece>\n";
-    vti << "  </ImageData>\n";
-    vti << "  <AppendedData encoding=\"raw\">\n_";
-
-    std::vector<real_t> fieldData(CELLS);
-    bin.read(reinterpret_cast<char *>(fieldData.data()), static_cast<std::streamsize>(fieldBytes));
-    if (!bin)
-    {
-        std::cerr << "Could not read scalar binary field for VTI: " << binaryPath << std::endl;
-        std::exit(EXIT_FAILURE);
-    }
-
-    vti.write(reinterpret_cast<const char *>(&fieldBytes), sizeof(fieldBytes));
-    vti.write(reinterpret_cast<const char *>(fieldData.data()), static_cast<std::streamsize>(fieldBytes));
-    if (!vti)
-    {
-        std::cerr << "Could not write scalar VTI output: " << vtiPath << std::endl;
-        std::exit(EXIT_FAILURE);
-    }
-
-    vti << "\n  </AppendedData>\n";
-    vti << "</VTKFile>\n";
-}
-
-static inline void writeScalarOutput(
-    const real_t *deviceField,
-    const char *fieldName)
-{
-    createOutputDirectories();
-
-    const std::filesystem::path binaryPath = getBinaryOutputDirectory() / (std::string(fieldName) + ".bin");
-    const std::filesystem::path vtiPath = getVtiOutputDirectory() / (std::string(fieldName) + ".vti");
-
-    writeScalarBinary(deviceField, binaryPath);
-    writeScalarVti(binaryPath, vtiPath, fieldName);
-}
-
-static inline void writeOutput(
-    const real_t *deviceMoments,
-    const natural_t step)
-{
-    createOutputDirectories();
-
-    const std::string base = outputStepName(step);
-    const std::filesystem::path binaryPath = getBinaryOutputDirectory() / (base + ".bin");
-    const std::filesystem::path vtiPath = getVtiOutputDirectory() / (base + ".vti");
-
-    writeBinary(deviceMoments, binaryPath);
-    writeVti(binaryPath, vtiPath);
+    std::filesystem::rename(tmp, path);
 }

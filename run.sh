@@ -78,5 +78,9 @@ mkdir -p "output/${case_lower}/${runId}"
 mkdir -p build
 read -r -a extra_nvcc_flags <<< "${NVCC_FLAGS:-}"
 
-nvcc -std=c++20 -O3 --restrict --expt-relaxed-constexpr --fmad=true --extra-device-vectorization --extended-lambda -arch="${CUDA_ARCH:-sm_86}" -lineinfo -Xptxas -v "${CASE_DEFINE}" "${extra_nvcc_flags[@]}" src/main.cu -o "build/${case_lower}"
+read -r -a hdf5_flags <<< "${HDF5_FLAGS:-$(pkg-config --cflags --libs hdf5)}"
+
+python3 scripts/build_convert_vti.py
+
+nvcc -std=c++20 -O3 --restrict --expt-relaxed-constexpr --fmad=true --extra-device-vectorization --extended-lambda -arch="${CUDA_ARCH:-sm_86}" -lineinfo -Xptxas -v "${CASE_DEFINE}" "${extra_nvcc_flags[@]}" src/main.cu -o "build/${case_lower}" "${hdf5_flags[@]}"
 "./build/${case_lower}" --runId "$runId" "${extra_args[@]}"

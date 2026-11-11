@@ -137,7 +137,28 @@ static void nee()
         close(rho,1.03);close(t,z==0 ? 1 : 0);
         for(int d=0;d<3;++d)close(j[d],0);
     }
-    cudaFree(device);std::cout<<"NEE population moments, force removal, exact wall velocity/temperature: PASS\n";
+    real_t *buffer;
+    outputCheckCuda(cudaMalloc(&buffer, host.size() * sizeof(real_t)), "fused NEE allocation");
+    outputCheckCuda(cudaMemset(buffer, 0xff, host.size() * sizeof(real_t)), "poison fused output");
+    streamCollide<<<dim3(GRID_X, GRID_Y, GRID_Z), dim3(BLOCK_NX, BLOCK_NY, BLOCK_NZ)>>>(device, buffer, 0);
+    outputCheckCuda(cudaMemcpy(host.data(), buffer, host.size() * sizeof(real_t), cudaMemcpyDeviceToHost), "fused NEE read");
+
+    const auto fused = host;
+    applyNEEPlates<<<dim3((NX + 31) / 32, (NY + 3) / 4, 2), dim3(32, 4)>>>(buffer, 1);
+    outputCheckCuda(cudaMemcpy(host.data(), buffer, host.size() * sizeof(real_t), cudaMemcpyDeviceToHost), "reference NEE read");
+    for (size_t i = 0; i < host.size(); ++i)
+    {
+        if (!std::isfinite(fused[i]))
+        {
+            std::cerr << "unwritten/nonfinite fused moment " << i << '\n';
+            std::exit(1);
+        }
+        close(fused[i], host[i], 0);
+    }
+
+    cudaFree(buffer);
+    cudaFree(device);
+    std::cout << "NEE population moments, force removal, exact walls and fused donor ownership: PASS\n";
 }
 __global__ void gradientField(real_t *m)
 {
@@ -157,7 +178,7 @@ static void gradientDiagnostics()
     gradientField<<<1,NZ>>>(m);
     rbc::Statistics s;
     rbc::reduceTiles<<<dim3(rbc::TILES,NZ),rbc::THREADS>>>(m,s.partial);
-    rbc::reducePlanes<<<rbc::PROFILE_SIZE,rbc::THREADS>>>(s.partial,s.deviceProfile);
+    rbc::reducePlanes<<<rbc::PLANE_BLOCKS,rbc::THREADS>>>(s.partial,s.deviceProfile);
     outputCheckCuda(cudaMemcpy(s.profile.data(),s.deviceProfile,rbc::PROFILE_SIZE*sizeof(double),cudaMemcpyDeviceToHost),"gradient profiles");
     const double kz=3.141592653589793/(NZ-1),ky=2*3.141592653589793/NY;
     for(unsigned z=0;z<NZ;++z)
@@ -182,7 +203,7 @@ static void diffusion()
     const int steps=std::lround(0.02*(NZ-1)*(NZ-1)/THERMAL_DIFFUSIVITY);
     for(int t=0;t<steps;++t)
     {
-        streamCollide<<<grid,block>>>(m,b,t);applyNEEPlates<<<plates,dim3(32,4)>>>(b);std::swap(m,b);
+        streamCollide<<<grid,block>>>(m,b,t);std::swap(m,b);
     }
     std::vector<real_t> t(CELLS),u(CELLS),ux(CELLS);
     outputCheckCuda(cudaMemcpy(t.data(),m+size_t(TEMP)*CELLS,CELLS*sizeof(real_t),cudaMemcpyDeviceToHost),"test read");

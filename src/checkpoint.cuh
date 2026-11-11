@@ -37,6 +37,13 @@ template<class T> inline void checkpointRead(std::istream &in,T *p,size_t n=1)
     if(!in) throw std::runtime_error("truncated checkpoint");
 }
 static std::filesystem::path checkpointDirectory() {return getSimulationOutputDirectory()/"checkpoints";}
+static std::filesystem::path checkpointHistoryDirectory()
+{
+    return canonicalOutputPath(getSimulationHdf5Directory()) ==
+        canonicalOutputPath(getSimulationOutputDirectory()) ?
+        checkpointDirectory() : getSimulationHdf5Directory()/"checkpoint_history";
+}
+
 static std::filesystem::path latestCheckpoint()
 {
     std::filesystem::path latest;
@@ -56,20 +63,30 @@ static std::filesystem::path latestCheckpoint()
 }
 static void checkpointMoments(std::ostream &out,const real_t *m)
 {
-    std::vector<real_t> field(CELLS);
+    constexpr natural_t chunk=std::min(CELLS,32u*STRIDE);
+    std::vector<real_t> field(chunk);
     for(natural_t f=0;f<NUM_MOMENTS;++f)
     {
-        outputCheckCuda(cudaMemcpy(field.data(),m+size_t(f)*CELLS,CELLS*sizeof(real_t),cudaMemcpyDeviceToHost),"checkpoint moments");
-        checkpointWrite(out,field.data(),field.size());
+        for(natural_t first=0;first<CELLS;first+=chunk)
+        {
+            const natural_t count=std::min(chunk,CELLS-first);
+            moment_io::download(field.data(),m,f,first,count);
+            checkpointWrite(out,field.data(),count);
+        }
     }
 }
 static void restoreMoments(std::istream &in,real_t *m)
 {
-    std::vector<real_t> field(CELLS);
+    constexpr natural_t chunk=std::min(CELLS,32u*STRIDE);
+    std::vector<real_t> field(chunk);
     for(natural_t f=0;f<NUM_MOMENTS;++f)
     {
-        checkpointRead(in,field.data(),field.size());
-        outputCheckCuda(cudaMemcpy(m+size_t(f)*CELLS,field.data(),CELLS*sizeof(real_t),cudaMemcpyHostToDevice),"restore moments");
+        for(natural_t first=0;first<CELLS;first+=chunk)
+        {
+            const natural_t count=std::min(chunk,CELLS-first);
+            checkpointRead(in,field.data(),count);
+            moment_io::upload(m,field.data(),f,first,count);
+        }
     }
 }
 #if defined(CASE_RAYLEIGH_BENARD)
@@ -83,6 +100,14 @@ static void saveCheckpoint(const real_t *m,natural_t step,const rbc::Statistics 
     checkpointWrite(out,s.mean.data(),s.mean.size());checkpointWrite(out,s.m2.data(),s.m2.size());
     checkpointWrite(out,s.sum.data(),s.sum.size());checkpointWrite(out,s.comp.data(),s.comp.size());
     out.close();if(!out) throw std::runtime_error("checkpoint close failed");
+    // Commit a closed HDF5 history alongside the unchanged binary checkpoint.
+    // The .chk rename is last: even a damaged in-flight statistics file can be
+    // recovered without losing the history preceding a committed checkpoint.
+    std::filesystem::create_directories(checkpointHistoryDirectory());
+    const auto history=checkpointHistoryDirectory()/("statistics_"+outputStepName(step)+".h5");
+    auto historyTmp=history;historyTmp+=".tmp";
+    std::filesystem::copy_file(statisticsPath(),historyTmp,std::filesystem::copy_options::overwrite_existing);
+    std::filesystem::rename(historyTmp,history);
     std::filesystem::rename(tmp,path);
 }
 static natural_t restoreCheckpoint(real_t *m,rbc::Statistics &s)
@@ -100,6 +125,14 @@ static natural_t restoreCheckpoint(real_t *m,rbc::Statistics &s)
     if(in.peek()!=std::char_traits<char>::eof() || s.lastSample!=(s.count ? h.start+s.count*h.stride : 0) ||
        s.count!=(h.step>h.start ? (h.step-h.start)/h.stride : 0))
         throw std::runtime_error("invalid checkpoint statistics or file length");
+    auto history=checkpointHistoryDirectory()/("statistics_"+outputStepName(h.step)+".h5");
+    if(!std::filesystem::exists(history)) history=checkpointDirectory()/history.filename();
+    if(std::filesystem::exists(history))
+    {
+        auto tmp=statisticsPath();tmp+=".restore";
+        std::filesystem::copy_file(history,tmp,std::filesystem::copy_options::overwrite_existing);
+        std::filesystem::rename(tmp,statisticsPath());
+    }
     std::cout<<"restored "<<path<<" with "<<s.count<<" averaged samples\n";
     return static_cast<natural_t>(h.step);
 }

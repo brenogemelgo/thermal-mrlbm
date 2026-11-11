@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [[ ! -x "$root/build/convertVTI" ]]; then
+    echo "Build the compiled converter first: make converter" >&2
+    exit 1
+fi
+exec "$root/build/convertVTI" "$@"

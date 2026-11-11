@@ -5,9 +5,9 @@ Examples:
     python3 postRayleigh.py all output/rayleigh_benard/short
     python3 postRayleigh.py convergence output/rayleigh_benard/RUN_ID
     python3 postRayleigh.py grid output/rayleigh_benard/rbc4_n*_rr3
-    python3 postRayleigh.py validation-summary output/rbc_validation --out output/rbc_validation/summary
+    python3 postRayleigh.py validation-summary output/rbc_validation_state --out results
 
-Reads reduced CSV statistics and metadata. Writes PNG/PDF figures and JSON
+Reads reduced HDF5 statistics and metadata (legacy CSV is also readable). Writes PNG/PDF figures and JSON
 reports without loading full simulation fields or asserting DNS convergence.
 """
 import argparse
@@ -19,6 +19,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 import numpy as np
+from scripts.rbc_hdf5 import read_metadata, read_table, processed_data, data_directory
+
+RESULTS = Path(__file__).resolve().parent/'results'
 
 NUS = ['nu_bottom', 'nu_top', 'nu_volume', 'nu_kinetic', 'nu_thermal']
 LABELS = ['Lower plate', 'Upper plate', 'Volume transport', 'Kinetic dissipation', 'Thermal dissipation']
@@ -29,22 +32,14 @@ plt.rcParams.update({'font.family': 'serif', 'font.size': 10, 'axes.labelsize': 
 
 
 def metadata(run):
-    result = {}
-    for line in (Path(run) / 'metadata.txt').read_text().splitlines():
-        if '=' not in line:
-            continue
-        k, v = (s.strip() for s in line.split('=', 1))
-        try:
-            result[k] = float(v)
-        except ValueError:
-            result[k] = v
+    result = read_metadata(run)
     if result.get('moment_format') != 'neq_post_v2':
         raise ValueError('expected version-2 non-equilibrium moment metadata')
     return result
 
 
 def load(run, name):
-    data = np.atleast_1d(np.genfromtxt(Path(run) / name, delimiter=',', names=True))
+    data = read_table(run, name)
     if not len(data):
         raise ValueError(f'no samples in {name}')
     return data
@@ -126,6 +121,9 @@ def report(run, out=None):
         raise ValueError(f'{run}: no post-transient samples')
     p = load(run, 'rbc_profiles.csv')
     stats = {name: uncertainty(avg[name]) for name in NUS}
+    for s in stats.values():
+        s['ci95_lower'] = s['mean']-1.96*s['stderr'] if s['stderr'] is not None else None
+        s['ci95_upper'] = s['mean']+1.96*s['stderr'] if s['stderr'] is not None else None
     means = np.array([stats[n]['mean'] for n in NUS])
     nu = stats['nu_volume']['mean']
     h = m['H']
@@ -141,7 +139,7 @@ def report(run, out=None):
                   target_averaging_duration_ff=m['AVERAGING_FF'],
                   completed_step=int(series['step'][-1]),
                   dns_convergence_established=False,
-                  uncertainty_note='Autocorrelation and batch estimates require stationarity and a block-error plateau; short records cannot establish convergence.')
+                  uncertainty_note='95% intervals use a Gaussian large-sample approximation with correlation-aware stderr. Stationarity and a block-error plateau require inspection; short records cannot establish convergence.')
     if m['RBC_CASE'] in [1, 2, 3] and m['RA'] > 0:
         reference = .124*m['RA']**.309
         result['reference'] = dict(Nu=reference, relative_difference=nu/reference-1, source=NIEMELA,
@@ -153,6 +151,7 @@ def report(run, out=None):
         out = Path(out)
         out.mkdir(parents=True, exist_ok=True)
         (out/'report.json').write_text(json.dumps(clean_json(result), indent=2, allow_nan=False)+'\n')
+        processed_data(run, out, result)
     return result
 
 
@@ -249,20 +248,77 @@ def grid_convergence(runs, out):
     (out/'grid_comparison.json').write_text(json.dumps(clean_json(result), indent=2, allow_nan=False)+'\n')
 
 
+def video(run, out, fps=30, stride=1):
+    """Stream saved slices or XZ hyperslabs of 3D HDF5 volumes; no extra exports."""
+    import h5py
+    from matplotlib.animation import FFMpegWriter, writers
+    if not writers.is_available('ffmpeg'):
+        raise RuntimeError('ffmpeg is required for --video / video; install it or disable video')
+    data = data_directory(run)
+    paths = sorted((data/'slices').glob('step_*.h5'))
+    source_kind = 'slices'
+    if not paths:
+        paths = sorted((data/'fields').glob('step_*.h5'))
+        source_kind = 'volumes'
+    paths = paths[::stride]
+    if len(paths) < 2:
+        raise ValueError(f'{run}: at least two HDF5 slices or volumes are needed for video')
+    m = metadata(run)
+    out.mkdir(parents=True, exist_ok=True)
+    target = out/'temperature_plumes.mp4'
+    temp = out/'temperature_plumes.tmp.mp4'
+    fig, ax = plt.subplots(figsize=(6.4, 5.6))
+    def plane(source):
+        data = source['fields/temperature']
+        return data[:] if data.ndim == 2 else data[:, data.shape[1]//2, :]
+    with h5py.File(paths[0], 'r') as f:
+        half = .5/m['H']
+        image = ax.imshow(plane(f), origin='lower',
+                          extent=[-half, (m['NX']-.5)/m['H'], -half, 1+half],
+                          vmin=m['TCOLD'], vmax=m['THOT'], cmap='inferno', interpolation='bilinear')
+        y = int(f.attrs['y_index']) if source_kind == 'slices' else int(m['NY'])//2
+    fig.colorbar(image, ax=ax, label=r'$T$')
+    ax.set(xlabel=r'$x/H$', ylabel=r'$z/H$', ylim=(0, 1))
+    title = ax.set_title('')
+    steps = []
+    writer = FFMpegWriter(fps=fps, codec='libx264', extra_args=['-crf', '18', '-pix_fmt', 'yuv420p'])
+    try:
+        with writer.saving(fig, str(temp), dpi=150):
+            for path in paths:
+                with h5py.File(path, 'r') as f:
+                    step = int(f.attrs['step'])
+                    image.set_data(plane(f))
+                steps.append(step)
+                title.set_text(f"{Path(run).name}\n$t/t_{{ff}}={step/m['T_FREEFALL']:.3f}$, $y/H={y/m['H']:.3f}$")
+                writer.grab_frame()
+        temp.replace(target)
+    finally:
+        plt.close(fig)
+    (out/'video.json').write_text(json.dumps(dict(run_id=Path(run).name, frames=len(paths), fps=fps, source=source_kind,
+        playback_seconds=len(paths)/fps, first_step=steps[0], last_step=steps[-1],
+        step_intervals=sorted(set(np.diff(steps).tolist())),
+        note='Uniform playback cadence; a final off-cadence snapshot may shorten the last physical interval.'), indent=2)+'\n')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('analysis', choices=['convergence', 'profiles', 'scaling', 'grid', 'all',
-                                            'validation', 'validation-summary'],
+                                            'validation', 'validation-summary', 'video'],
                         help='plot selection; all generates every figure and report')
     parser.add_argument('runs', nargs='+', type=Path,
                         help='simulation output directories, or a campaign root for validation-summary')
-    parser.add_argument('--out', type=Path, default=Path('output/rbc_plots'), help='figure/report output directory')
+    parser.add_argument('--out', type=Path, default=RESULTS, help='results root; each run uses its exact original run ID')
+    parser.add_argument('--video', action='store_true', help='also render HDF5 slices to MP4 (requires ffmpeg)')
+    parser.add_argument('--video-fps', type=int, default=30)
+    parser.add_argument('--video-stride', type=int, default=1)
     a = parser.parse_args()
+    if a.video_fps <= 0 or a.video_stride <= 0:
+        parser.error('video FPS and stride must be positive')
     if a.analysis == 'validation-summary':
         if len(a.runs) != 1:
             parser.error('validation-summary expects one campaign root')
         from scripts.rbc_validation_analysis import summarize_campaign
-        summarize_campaign(a.runs[0], a.out)
+        summarize_campaign(a.runs[0], a.out/'rbc_validation_summary')
         return
     for run in a.runs:
         dest = a.out/run.name
@@ -274,10 +330,19 @@ def main():
             convergence(run, dest)
         if a.analysis in ['profiles', 'all']:
             profiles(run, dest)
-    if a.analysis in ['scaling', 'all']:
-        scaling(a.runs, a.out)
-    if a.analysis in ['grid', 'all']:
-        grid_convergence(a.runs, a.out)
+        if a.analysis == 'profiles':
+            processed_data(run, dest, None)
+        if a.analysis == 'video' or a.video:
+            video(run, dest, a.video_fps, a.video_stride)
+        if a.analysis == 'all':
+            scaling([run], dest)
+            grid_convergence([run], dest)
+    if a.analysis == 'scaling':
+        for run in a.runs:
+            scaling(a.runs, a.out/run.name)
+    if a.analysis == 'grid':
+        for run in a.runs:
+            grid_convergence(a.runs, a.out/run.name)
 
 
 if __name__ == '__main__':

@@ -1,5 +1,5 @@
 #pragma once
-#include "deviceFunctions.cuh"
+#include "momentStorage.cuh"
 #include "bitmasks.cuh"
 #include "validation/physics.cuh"
 
@@ -78,7 +78,8 @@ __device__ __host__ inline real_t thermalPopulation(real_t t, const real_t (&j)[
         ThermalVelocitySet::cy<Q>()*j[1] + ThermalVelocitySet::cz<Q>()*j[2]));
 }
 
-__device__ inline HydroState loadHydro(const real_t *m, natural_t idx)
+template <typename Input>
+__device__ inline HydroState loadHydro(Input m, natural_t idx)
 {
     HydroState s;
     s.rho = loadMoment(m,idx,RHO);

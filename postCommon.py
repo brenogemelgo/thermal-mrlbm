@@ -6,7 +6,7 @@ Run the case scripts from the repository root:
     python3 postRayleigh.py all output/rayleigh_benard/RUN_ID
 
 Array convention:
-    Binary fields use CUDA indexing idx = x + y * NX + z * NX * NY.
+    HDF5 fields and legacy binaries use idx = x + y * NX + z * NX * NY.
     Helpers return arrZyx arrays with shape (NZ, NY, NX), indexed as arrZyx[z, y, x].
 """
 
@@ -15,6 +15,7 @@ import json
 import re
 
 import numpy as np
+from scripts.rbc_hdf5 import data_directory
 
 
 momentNames = [
@@ -86,6 +87,9 @@ def getRunDir(caseName, runId, outputRoot="output"):
 
 
 def readMetadata(runDir):
+    if (data_directory(runDir)/'metadata.h5').exists():
+        from scripts.rbc_hdf5 import read_metadata
+        return read_metadata(runDir)
     jsonPath = runDir / "metadata.json"
     textPath = runDir / "metadata.txt"
 
@@ -152,7 +156,7 @@ def getBool(metadata, keyOptions, defaultValue=missingValue):
 
 
 def getPostDir(runDir):
-    postDir = runDir / "post"
+    postDir = Path(__file__).resolve().parent / 'results' / Path(runDir).name
     postDir.mkdir(parents=True, exist_ok=True)
     return postDir
 
@@ -165,6 +169,9 @@ def getBinaryDir(runDir):
 
 
 def listAvailableSteps(runDir):
+    h5steps = sorted(int(p.stem.split('_')[1]) for p in (data_directory(runDir)/'fields').glob('step_*.h5'))
+    if not (Path(runDir)/'binaries').exists():
+        return h5steps
     binaryDir = getBinaryDir(runDir)
     stepValues = []
 
@@ -173,7 +180,7 @@ def listAvailableSteps(runDir):
         if matchValue is not None:
             stepValues.append(int(matchValue.group(1)))
 
-    return sorted(stepValues)
+    return sorted(set(stepValues+h5steps))
 
 
 def selectStep(runDir, selectedStep):
@@ -200,6 +207,11 @@ def getStepBinaryPath(runDir, stepValue):
 
 
 def listAvailableFields(runDir):
+    paths = sorted((data_directory(runDir)/'fields').glob('step_*.h5'))
+    if paths:
+        import h5py
+        with h5py.File(paths[-1], 'r') as source:
+            return sorted(source['fields'])
     binaryDir = getBinaryDir(runDir)
     fieldNames = list(momentNames)
 
@@ -249,6 +261,14 @@ def reshapeZyx(rawValues, metadata):
 
 def readPackedField(runDir, metadata, fieldName, stepValue):
     canonicalName = canonicalFieldName(fieldName)
+    path = data_directory(runDir)/'fields'/f'step_{int(stepValue):09d}.h5'
+    if path.exists():
+        import h5py
+        with h5py.File(path, 'r') as source:
+            if canonicalName not in source['fields']:
+                raise ValueError(f'{canonicalName} is not a physical snapshot field: {path}')
+            # HDF5 velocities are already physical; never subtract acceleration twice.
+            return source['fields/'+canonicalName][:]
     if canonicalName not in momentNames:
         availableText = ", ".join(listAvailableFields(runDir))
         raise RuntimeError(f"Field '{fieldName}' is not stored in step binaries. Available fields: {availableText}")
@@ -301,6 +321,13 @@ def readVectorComponents(runDir, metadata, componentNames, selectedStep=None):
 
 def tryReadStandaloneScalarField(runDir, metadata, fieldName):
     canonicalName = canonicalFieldName(fieldName)
+    h5path = data_directory(runDir)/(canonicalName+'.h5')
+    if h5path.exists():
+        import h5py
+        with h5py.File(h5path, 'r') as source:
+            return source[canonicalName][:]
+    if not (Path(runDir)/'binaries').exists():
+        return None
     binaryPath = getBinaryDir(runDir) / f"{canonicalName}.bin"
 
     if not binaryPath.exists():

@@ -72,14 +72,13 @@ __device__ static __forceinline__ void initialPrimitiveFields(
 #endif
 }
 
-__global__ void initializeCase(
-    real_t *moments,
-    real_t *dbuffer)
+template <typename Output>
+__device__ __forceinline__ void initializeNode(
+    Output moments,
+    natural_t x,
+    natural_t y,
+    natural_t z)
 {
-    const natural_t x = threadIdx.x + BLOCK_NX * blockIdx.x;
-    const natural_t y = threadIdx.y + BLOCK_NY * blockIdx.y;
-    const natural_t z = threadIdx.z + BLOCK_NZ * blockIdx.z;
-
     if (x >= NX || y >= NY || z >= NZ)
     {
         return;
@@ -103,40 +102,55 @@ __global__ void initializeCase(
 #endif
     const real_t u[3] = {uxRaw, uyRaw, uzRaw};
     nodeAcceleration(temperature,x,y,z,0,a);
-    moments[midx(idx,RHO)] = rho;
-    moments[midx(idx,TEMP)] = temperature;
+    momentRef(moments, idx, RHO) = rho;
+    momentRef(moments, idx, TEMP) = temperature;
     for(int d=0; d<3; ++d)
     {
-        moments[midx(idx,UX+d)] = u[d]+a[d]/2;
-        moments[midx(idx,TUX+d)] = temperature*u[d];
+        momentRef(moments, idx, UX+d) = u[d]+a[d]/2;
+        momentRef(moments, idx, TUX+d) = temperature*u[d];
     }
     for(int d=0; d<6; ++d)
     {
         const int i=d<3 ? d : d==3 || d==4 ? 0 : 1;
         const int j=d<3 ? d : d==3 ? 1 : 2;
-        moments[midx(idx,PXX+d)] = -a[i]*a[j]/4;
+        momentRef(moments, idx, PXX+d) = -a[i]*a[j]/4;
     }
 #if defined(CASE_RAYLEIGH_BENARD)
     // Exact post-collision conductive flux for a linear temperature field.
-    moments[midx(idx,TUZ)] = (TAU_THERMAL-1)*ThermalVelocitySet::cs2()*ActiveCase::DELTA_T/ActiveCase::H;
+    momentRef(moments, idx, TUZ) = (TAU_THERMAL-1)*ThermalVelocitySet::cs2()*ActiveCase::DELTA_T/ActiveCase::H;
 #endif
 #if defined(RBC_VALIDATION_CASE) && RBC_VALIDATION_CASE == 2
     const double h=NZ-1.,X=double(x)/NX,Z=double(z)/h;
     const double tx=ActiveCase::MODE_AMPLITUDE*2*validation::PI/NX*cos(2*validation::PI*X)*sin(validation::PI*Z);
     const double tz=(-1+ActiveCase::MODE_AMPLITUDE*validation::PI*sin(2*validation::PI*X)*cos(validation::PI*Z))/h;
     const double tdt=-THERMAL_DIFFUSIVITY/(h*h)*ActiveCase::MODE_AMPLITUDE*sin(2*validation::PI*X)*sin(validation::PI*Z);
-    moments[midx(idx,TUX)]=temperature*u[0]-(TAU_THERMAL-1)*(tx/3+tdt*u[0]);
-    moments[midx(idx,TUZ)]=-(TAU_THERMAL-1)*tz/3;
+    momentRef(moments, idx, TUX)=temperature*u[0]-(TAU_THERMAL-1)*(tx/3+tdt*u[0]);
+    momentRef(moments, idx, TUZ)=-(TAU_THERMAL-1)*tz/3;
 #endif
 #if defined(RBC_VALIDATION_CASE) && RBC_VALIDATION_CASE == 3
     // Post-collision, force-corrected CE stress, not a persistent full moment.
     const double grad=ActiveCase::CHANNEL_RE*VISCOSITY/(ActiveCase::H*ActiveCase::H)*validation::PI*
         cos(validation::PI*z/ActiveCase::H);
-    moments[midx(idx,PXZ)]+=(1-OMEGA_SHEAR)*(-TAU_SHEAR*VelocitySet::cs2()*grad);
+    momentRef(moments, idx, PXZ)+=(1-OMEGA_SHEAR)*(-TAU_SHEAR*VelocitySet::cs2()*grad);
 #endif
 
-    for (natural_t k = 0; k < NUM_MOMENTS; ++k)
+}
+
+__global__ void initializeCase(real_t *moments, real_t *dbuffer)
+{
+    const natural_t x = threadIdx.x + BLOCK_NX * blockIdx.x;
+    const natural_t y = threadIdx.y + BLOCK_NY * blockIdx.y;
+    const natural_t z = threadIdx.z + BLOCK_NZ * blockIdx.z;
+    if (x >= NX || y >= NY || z >= NZ)
     {
-        dbuffer[midx(idx, k)] = moments[midx(idx, k)];
+        return;
     }
+
+    initializeNode(moments, x, y, z);
+    const natural_t index = global3(x, y, z);
+    constexpr_for<0, NUM_MOMENTS>(
+        [&](const auto Field) noexcept
+        {
+            dbuffer[midx(index, Field)] = moments[midx(index, Field)];
+        });
 }

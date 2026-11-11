@@ -65,6 +65,8 @@ class Solver final : public moment_io::Distributed
         std::vector<double> validationHost;
 #endif
         cudaStream_t bulk = nullptr, skin = nullptr, copy = nullptr, upload = nullptr;
+        cudaStream_t snapshotCopy = nullptr;
+        cudaEvent_t snapshotBegin = nullptr, snapshotEnd = nullptr;
         cudaEvent_t bulkDone[2] = {}, skinDone[2] = {}, downloaded[2] = {}, transferred[2] = {};
         bool enabledPeer = false;
     };
@@ -193,6 +195,9 @@ class Solver final : public moment_io::Distributed
             if (part.skin) cudaStreamDestroy(part.skin);
             if (part.copy) cudaStreamDestroy(part.copy);
             if (part.upload) cudaStreamDestroy(part.upload);
+            if (part.snapshotCopy) cudaStreamDestroy(part.snapshotCopy);
+            if (part.snapshotBegin) cudaEventDestroy(part.snapshotBegin);
+            if (part.snapshotEnd) cudaEventDestroy(part.snapshotEnd);
             if (part.enabledPeer) cudaDeviceDisablePeerAccess(parts[1 - rank].device);
             // Host staging records transfer completion on the destination GPU.
             if (transport == Transport::Host && parts[1 - rank].device >= 0)
@@ -491,6 +496,41 @@ public:
             }
         });
         primary();
+    }
+
+    double captureTemperature(real_t *host, const real_t *token) override
+    {
+        const int state = buffer(token);
+        for (auto &part : parts)
+        {
+            check(cudaSetDevice(part.device), "select temperature capture GPU");
+            if (!part.snapshotCopy)
+            {
+                check(cudaStreamCreateWithFlags(&part.snapshotCopy, cudaStreamNonBlocking), "create temperature capture stream");
+                check(cudaEventCreate(&part.snapshotBegin), "create temperature capture start");
+                check(cudaEventCreate(&part.snapshotEnd), "create temperature capture end");
+            }
+            {
+                h5out::ComputeWaitTimer computation;
+                check(cudaEventSynchronize(part.bulkDone[state]), "wait captured interior");
+                check(cudaEventSynchronize(part.skinDone[state]), "wait captured interface");
+            }
+            check(cudaEventRecord(part.snapshotBegin, part.snapshotCopy), "start temperature capture");
+            check(cudaMemcpyAsync(host + size_t(part.begin) * STRIDE, part.state[state] + size_t(TEMP) * part.cells,
+                                  size_t(part.cells) * sizeof(real_t), cudaMemcpyDeviceToHost, part.snapshotCopy), "capture local temperature");
+            check(cudaEventRecord(part.snapshotEnd, part.snapshotCopy), "record local temperature capture");
+        }
+        double elapsed = 0;
+        for (const auto &part : parts)
+        {
+            check(cudaSetDevice(part.device), "select temperature capture completion GPU");
+            check(cudaEventSynchronize(part.snapshotEnd), "finish local temperature capture");
+            float milliseconds = 0;
+            check(cudaEventElapsedTime(&milliseconds, part.snapshotBegin, part.snapshotEnd), "time local temperature capture");
+            elapsed += milliseconds / 1000.;
+        }
+        primary();
+        return elapsed;
     }
 
     void validation(double *host, const real_t *now, const real_t *old) override

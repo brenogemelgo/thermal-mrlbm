@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -134,20 +135,24 @@ static bool convert(const fs::path &source,const Options &options,std::set<fs::p
     const auto step=stepNumber(attribute(file,"step"));
     if(!options.steps.empty() && !options.steps.count(step)) return false;
     require(attribute(file,"axis_order")=="zyx","expected ZYX axis order");
-    require(attribute(file,"velocity_convention")=="physical_u","expected physical velocities; refusing an ambiguous force shift");
+    const bool hasVelocity=H5Lexists(fields,"ux",H5P_DEFAULT)>0;
+    require((H5Lexists(fields,"uy",H5P_DEFAULT)>0)==hasVelocity &&
+            (H5Lexists(fields,"uz",H5P_DEFAULT)>0)==hasVelocity,"incomplete velocity vector");
+    if(hasVelocity)
+        require(attribute(file,"velocity_convention")=="physical_u","expected physical velocities; refusing an ambiguous force shift");
     const std::string runId=attribute(file,"run_id");
     require(validRunId(runId),"invalid original run ID");
     Handle ttype(H5Dget_type(temperature),H5Tclose);
     const size_t bytes=H5Tget_size(ttype);
     require(H5Tget_class(ttype)==H5T_FLOAT && (bytes==4 || bytes==8),"expected FP32/FP64 fields");
-    Handle ux(H5Dopen2(fields,"ux",H5P_DEFAULT),H5Dclose);
-    Handle uy(H5Dopen2(fields,"uy",H5P_DEFAULT),H5Dclose);
-    Handle uz(H5Dopen2(fields,"uz",H5P_DEFAULT),H5Dclose);
-    const std::array<hid_t,3> velocity={ux.id,uy.id,uz.id};
-    for(const auto data:velocity)
+    std::vector<std::unique_ptr<Handle>> velocity;
+    if(hasVelocity)
+        for(const auto name:{"ux","uy","uz"})
+            velocity.emplace_back(new Handle(H5Dopen2(fields,name,H5P_DEFAULT),H5Dclose));
+    for(const auto &data:velocity)
     {
-        Handle type(H5Dget_type(data),H5Tclose);
-        require(shape(data)==dims && H5Tget_class(type)==H5T_FLOAT && H5Tget_size(type)==bytes,
+        Handle type(H5Dget_type(*data),H5Tclose);
+        require(shape(*data)==dims && H5Tget_class(type)==H5T_FLOAT && H5Tget_size(type)==bytes,
                 "inconsistent velocity shape/precision");
     }
     const uint64_t planeCells=multiply(dims[1],dims[2]);
@@ -165,17 +170,19 @@ static bool convert(const fs::path &source,const Options &options,std::set<fs::p
     std::ostringstream header;
     header<<"<?xml version=\"1.0\"?>\n<VTKFile type=\"ImageData\" version=\"1.0\" byte_order=\"LittleEndian\" header_type=\"UInt64\">\n"
           <<"  <ImageData WholeExtent=\""<<extent<<"\" Origin=\"0 0 0\" Spacing=\"1 1 1\">\n"
-          <<"    <Piece Extent=\""<<extent<<"\">\n      <PointData Scalars=\"temperature\" Vectors=\"velocity\">\n"
-          <<"        <DataArray type=\""<<vtkType<<"\" Name=\"temperature\" NumberOfComponents=\"1\" format=\"appended\" offset=\"0\"/>\n"
-          <<"        <DataArray type=\""<<vtkType<<"\" Name=\"velocity\" NumberOfComponents=\"3\" format=\"appended\" offset=\""<<scalarBytes+8<<"\"/>\n"
-          <<"      </PointData>\n      <CellData/>\n    </Piece>\n  </ImageData>\n  <AppendedData encoding=\"raw\">\n_";
+          <<"    <Piece Extent=\""<<extent<<"\">\n      <PointData Scalars=\"temperature\""
+          <<(hasVelocity ? " Vectors=\"velocity\"" : "")<<">\n"
+          <<"        <DataArray type=\""<<vtkType<<"\" Name=\"temperature\" NumberOfComponents=\"1\" format=\"appended\" offset=\"0\"/>\n";
+    if(hasVelocity)
+        header<<"        <DataArray type=\""<<vtkType<<"\" Name=\"velocity\" NumberOfComponents=\"3\" format=\"appended\" offset=\""<<scalarBytes+8<<"\"/>\n";
+    header<<"      </PointData>\n      <CellData/>\n    </Piece>\n  </ImageData>\n  <AppendedData encoding=\"raw\">\n_";
     const std::string prefix=header.str(),suffix="\n  </AppendedData>\n</VTKFile>\n";
     foundSteps.insert(step);
     OutputLock outputLock(destination);
     if(fs::exists(destination))
     {
         require(options.skipExisting,"refusing to overwrite "+destination.string()+" (use --skip-existing to resume)");
-        require(fs::file_size(destination)==prefix.size()+16+4*scalarBytes+suffix.size(),"existing VTI has an incompatible size");
+        require(fs::file_size(destination)==prefix.size()+(hasVelocity ? 16+4*scalarBytes : 8+scalarBytes)+suffix.size(),"existing VTI has an incompatible size");
         std::cout<<"preserved "<<destination<<'\n'; return true;
     }
     fs::create_directories(destination.parent_path());
@@ -188,16 +195,19 @@ static bool convert(const fs::path &source,const Options &options,std::set<fs::p
         std::vector<unsigned char> scalar(static_cast<size_t>(planeBytes));
         for(hsize_t z=0;z<dims[0];++z)
         { plane(temperature,diskType,z,dims[1],dims[2],scalar.data()); writeBytes(out,scalar.data(),scalar.size()); }
-        writeLength(out,3*scalarBytes);
-        std::array<std::vector<unsigned char>,3> component;
-        for(auto &values:component) values.resize(static_cast<size_t>(planeBytes));
-        std::vector<unsigned char> packed(static_cast<size_t>(3*planeBytes));
-        for(hsize_t z=0;z<dims[0];++z)
+        if(hasVelocity)
         {
-            for(int d=0;d<3;++d) plane(velocity[d],diskType,z,dims[1],dims[2],component[d].data());
-            for(size_t i=0;i<planeCells;++i) for(size_t d=0;d<3;++d)
-                std::memcpy(packed.data()+(3*i+d)*bytes,component[d].data()+i*bytes,bytes);
-            writeBytes(out,packed.data(),packed.size());
+            writeLength(out,3*scalarBytes);
+            std::array<std::vector<unsigned char>,3> component;
+            for(auto &values:component) values.resize(static_cast<size_t>(planeBytes));
+            std::vector<unsigned char> packed(static_cast<size_t>(3*planeBytes));
+            for(hsize_t z=0;z<dims[0];++z)
+            {
+                for(int d=0;d<3;++d) plane(*velocity[d],diskType,z,dims[1],dims[2],component[d].data());
+                for(size_t i=0;i<planeCells;++i) for(size_t d=0;d<3;++d)
+                    std::memcpy(packed.data()+(3*i+d)*bytes,component[d].data()+i*bytes,bytes);
+                writeBytes(out,packed.data(),packed.size());
+            }
         }
         writeBytes(out,suffix.data(),suffix.size()); out.close(); require(bool(out),"VTI close failed");
         fs::rename(temporary,destination);
@@ -351,7 +361,7 @@ static int run(int argc,char **argv)
     require(!files.empty(),"no HDF5 files found");
     Lock lock(options.results);std::set<uint64_t> foundSteps;
     const size_t converted=parallelConvert(files,options,foundSteps);
-    require(converted>0,"no matching 3D temperature/velocity volumes found (statistics and slices are skipped)");
+    require(converted>0,"no matching 3D temperature volumes found (statistics and slices are skipped)");
     require(options.steps.empty() || foundSteps==options.steps,"some requested timesteps were not found");
     std::cout<<converted<<" volume(s) converted/preserved\n"; return 0;
 }

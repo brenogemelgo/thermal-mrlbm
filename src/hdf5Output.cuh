@@ -13,10 +13,27 @@ namespace h5out
 {
 inline int &compression() {static int value=1;return value;}
 inline double &ioSeconds() {static double value=0;return value;}
+inline unsigned &ioDepth() {static unsigned value=0;return value;}
+inline unsigned &computeWaitDepth() {static unsigned value=0;return value;}
+inline void settleTimer()
+{
+    static auto previous=std::chrono::steady_clock::now();
+    const auto now=std::chrono::steady_clock::now();
+    if(ioDepth() && !computeWaitDepth())
+        ioSeconds()+=std::chrono::duration<double>(now-previous).count();
+    previous=now;
+}
 struct OutputTimer
 {
-    std::chrono::steady_clock::time_point start=std::chrono::steady_clock::now();
-    ~OutputTimer() {ioSeconds()+=std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();}
+    OutputTimer() {settleTimer();++ioDepth();}
+    ~OutputTimer() {settleTimer();--ioDepth();}
+};
+// Waiting for queued numerical work belongs to computation, even when a field
+// capture initiated that wait. Nested output regions are charged only once.
+struct ComputeWaitTimer
+{
+    ComputeWaitTimer() {settleTimer();++computeWaitDepth();}
+    ~ComputeWaitTimer() {settleTimer();--computeWaitDepth();}
 };
 inline void check(herr_t status) {if(status<0) throw std::runtime_error("HDF5 operation failed");}
 struct Handle

@@ -20,8 +20,8 @@ The horizontal aspect ratio is `512/511`; compiled FP32 constants have roundoff.
 
 - **3D fields: every 5000 steps for RBC-1/2 and 10000 steps for RBC-3/4**, plus
   initialization and the final step. These intervals are approximately 0.489
-  and 0.978 tff, respectively. Each file contains only FP32 temperature and
-  physical ux/uy/uz.
+  and 0.978 tff, respectively. Each new file contains only FP32 temperature.
+  Velocity-dependent diagnostics remain in the online reduced statistics.
 - **Checkpoints: every 100000 steps**, plus completion. Keep the latest two
   checkpoint/history pairs per case. Checkpoints do not include step zero.
 - **Statistics: every 100 steps**, independently of field/checkpoint output.
@@ -118,7 +118,9 @@ local run directory with its data link, or an HDF5 root containing multiple runs
 The application discovers volumes recursively and skips metadata, reduced
 statistics, validation moments and 2D slices. It infers ZYX dimensions, FP32/FP64
 precision and the original run ID from each volume. It requires physical-velocity
-metadata and never applies another force shift.
+metadata when legacy velocity datasets are present and never applies another force
+shift. Temperature-only volumes produce scalar VTI files; legacy four-field
+volumes retain their temperature and velocity vector.
 
 Conversion is **parallel across volumes using CPU worker processes**. Default:
 up to four workers, bounded by available logical CPUs; `--jobs N` selects 1..256
@@ -148,10 +150,10 @@ solver has exited; SWMR access to live statistics files is not enabled.
 
 ## Storage: decimal TB, no compression savings
 
-Every full timestamp contains **four FP32 scalar fields**:
+Every new full timestamp contains **one FP32 temperature field**:
 
 ```
-512^3 * 4 fields * 4 bytes = 2 GiB = 2.147483648 GB
+512^3 * 1 field * 4 bytes = 0.5 GiB = 0.536870912 GB
 ```
 
 No compression ratio is assumed. Counts include initial/final snapshots.
@@ -161,20 +163,20 @@ explicitly produced by the converter.
 
 | Case | Interval | HDF5 volumes | HDF5 GiB | HDF5 decimal TB |
 | --- | ---: | ---: | ---: | ---: |
-| RBC-1 | 5000 | 512 | 1024 | 1.099512 |
-| RBC-2 | 5000 | 615 | 1230 | 1.320702 |
-| RBC-3 | 10000 | 512 | 1024 | 1.099512 |
-| RBC-4 | 10000 | 512 | 1024 | 1.099512 |
-| Total | | 2151 | 4302 | **4.619237** |
+| RBC-1 | 5000 | 512 | 256 | 0.274878 |
+| RBC-2 | 5000 | 615 | 307.5 | 0.330176 |
+| RBC-3 | 10000 | 512 | 256 | 0.274878 |
+| RBC-4 | 10000 | 512 | 256 | 0.274878 |
+| Total | | 2151 | 1075.5 | **1.154809** |
 
 Two retained checkpoints per case add about **56 GiB = 0.06013 TB** across the
 campaign; raw moments are about 7 GiB per checkpoint. Reduced statistics,
 checkpoint headers and retained history copies bring the numeric total to about
-**4.680 TB**, before container/filesystem overhead, plots and video. There are
+**1.215 TB**, before container/filesystem overhead, plots and video. There are
 26, 31, 52 and 52 checkpoint writes, but only two pairs per case are retained.
 An atomic checkpoint commit temporarily retains a third checkpoint/history pair.
-Each explicitly converted VTI adds the same four-field numeric payload as its
-source volume (2 GiB); converting RBC-3 alone adds about **1.099512 TB** before
+Each explicitly converted VTI adds the same numeric payload as its
+source volume (0.5 GiB for new temperature-only files); converting RBC-3 alone adds about **0.274878 TB** before
 small XML/block/lock overhead. These are stored bytes, not cumulative write traffic.
 
 ### Comparison with the previous 10000-step RBC-1/2 output
@@ -186,14 +188,17 @@ online diagnostics, which remain sampled every 100 steps.
 
 | Case | Volumes at 10000 | HDF5 TB at 10000 | Volumes at 5000 | HDF5 TB at 5000 |
 | --- | ---: | ---: | ---: | ---: |
-| RBC-1 | 257 | 0.551903 | 512 | 1.099512 |
-| RBC-2 | 308 | 0.661425 | 615 | 1.320702 |
+| RBC-1 | 257 | 0.137976 | 512 | 0.274878 |
+| RBC-2 | 308 | 0.165356 | 615 | 0.330176 |
 
-With RBC-3/4 at 10000, the configured campaign field payload is **4.619237 TB**,
-an increase of **1.206886 TB** over the previous all-10000 schedule. With two
-retained checkpoints per case and reduced statistics, estimate **4.680 TB**
-instead of **3.473 TB**, still excluding VTI and container overhead. The configured
+For temperature-only exports with RBC-3/4 at 10000, the configured campaign field
+payload is **1.154809 TB**, an increase of **0.301721 TB** over an all-10000 schedule.
+With two retained checkpoints per case and reduced statistics, estimate **1.215 TB**
+instead of about **0.913 TB**, still excluding VTI and container overhead. The configured
 defaults are 5000 for RBC-1/2 and 10000 for RBC-3/4; no override is needed.
+
+These counts assume a fresh campaign. Existing four-field snapshots are preserved
+when resuming; their extra velocity bytes are not reclaimed automatically.
 
 ## HDF5 schema and numerical diagnostics
 
@@ -211,8 +216,8 @@ defaults are 5000 for RBC-1/2 and 10000 for RBC-3/4; no override is needed.
 - `/statistics/runtime`: extendible FP64 timing table. Its `columns` attribute
   records session start, percentage, elapsed/window seconds, sustained window/
   cumulative MLUPS, computation/output seconds and ETA.
-- `fields/step_*.h5:/fields/{temperature,ux,uy,uz}` has ZYX shape `(NZ,NY,NX)`.
-  Velocities are physical u. File attributes record step, run ID, axis order,
+- `fields/step_*.h5:/fields/temperature` has ZYX shape `(NZ,NY,NX)`.
+  Legacy snapshots may additionally contain physical ux/uy/uz. File attributes record step, run ID, axis order,
   lattice spacing and velocity convention. Slices have ZX shape and a Y index.
 - Lossless shuffle + gzip level 1 (configurable 0..9; zero disables gzip/shuffle)
   and Fletcher32 checksums are used. Chunks: 3D `(1,min(64,NY),min(128,NX))`,
@@ -299,6 +304,10 @@ python3 postRayleigh.py all output/rayleigh_benard/rbc1_n512_rr3
 `--profile-every`, `--progress-every`, `--checkpoint-every`, `--output-start`,
 `--keep-checkpoints`, `--compression`, `--slice-velocity` stay configurable.
 `--hdf5-root`, `--output-root`, `--results-root` select the three storage locations.
+`--field-io async|sync|serial` selects background, blocking parallel, or bounded
+plane snapshot IO. `--io-workers N` sets 1..32 CPU compression workers (default 4).
+The default asynchronous path uses one pinned temperature volume (512 MiB at
+512³ FP32), shared with a separate CPU writer. See [the export guide](export-pipeline.md).
 `--no-video` disables the RBC-3 preview. A fresh invocation skips completed jobs,
 while interrupted output requires explicit `--resume`. A matching completed post
 receipt skips analysis; `--post-only` regenerates it. Failures retain prior results.

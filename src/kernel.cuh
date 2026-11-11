@@ -142,8 +142,10 @@ __device__ __forceinline__ void streamCollideNode(
     // V2 isolates the scalar equation: velocity is prescribed, not solved.
     validation::prescribedVelocity(z, step + 1, velocity);
     state.rho = 1;
-    constexpr_for<0, 3>([&](const auto D) noexcept { state.v[D] = velocity[D]; });
-    constexpr_for<0, 6>([&](const auto D) noexcept { state.p[D] = 0; });
+    constexpr_for<0, 3>([&](const auto D) noexcept
+                        { state.v[D] = velocity[D]; });
+    constexpr_for<0, 6>([&](const auto D) noexcept
+                        { state.p[D] = 0; });
 #endif
 
     const natural_t index = global3(x, y, z);

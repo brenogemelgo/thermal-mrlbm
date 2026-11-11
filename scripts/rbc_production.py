@@ -65,7 +65,7 @@ def configuration(case, args):
                checkpoint_every=interval('checkpoint_every', 100000),
                output_start=args.output_start, keep_checkpoints=args.keep_checkpoints,
                compression=args.compression, slice_velocity=args.slice_velocity,
-               export_fields=['temperature', 'ux', 'uy', 'uz'], vti_enabled=False,
+               export_fields=['temperature'], vti_enabled=False,
                hdf5_root=str(args.hdf5_root.resolve()))
     return cfg
 
@@ -82,7 +82,7 @@ def storage(cfg):
     # Progress triggers are a union of schedules; bound its rows by the sum.
     progress_bound = scalar_samples+checkpoints+volumes+slices+math.ceil(end/(cfg['profile_every'] or end))+math.ceil(end/(cfg['progress_every'] or end))
     reduced_bound = scalar_samples*21*8+progress_bound*12*8+n*19*8+5*5*8
-    fields = volumes*4*n**3*4
+    fields = volumes*len(cfg['export_fields'])*n**3*4
     slice_bytes = slices*(2 if cfg['slice_velocity'] else 1)*n**2*4
     total = fields+slice_bytes+retained*cp_bytes+reduced_bound
     optional_vti = fields if cfg['case']==3 else 0
@@ -99,7 +99,7 @@ def storage(cfg):
                 checkpoint_history_bound_GiB=retained*reduced_bound/2**30,
                 checkpoint_transaction_peak_extra_GiB=(cp_bytes+reduced_bound)/2**30,
                 snapshot_bytes_per_field=n**3*4, slice_bytes_per_field=n**2*4,
-                note='Uncompressed numeric payload only; add HDF5/chunk/filesystem overhead and plots/video. Field-export figures exclude checkpoints/statistics. RBC-3 VTI comparison assumes an additional uncompressed T/velocity copy; VTI is off by default. No compression ratio assumed.')
+                note='Uncompressed numeric payload only; add HDF5/chunk/filesystem overhead and plots/video. Field-export figures exclude checkpoints/statistics. RBC-3 VTI comparison assumes the same fields as its source; VTI is off by default. No compression ratio assumed.')
 
 
 def wants_video(cfg, args):
@@ -172,6 +172,8 @@ def main():
     parser.add_argument('--devices', help='visible CUDA ordinals, e.g. 0,1')
     parser.add_argument('--split-z', type=int, help='compile-time interface for unequal GPU capacities/speeds')
     parser.add_argument('--halo-transport', choices=('peer', 'host', 'auto'), default='peer')
+    parser.add_argument('--field-io', choices=('async', 'sync', 'serial'), default='async')
+    parser.add_argument('--io-workers', type=int, choices=range(1, 33), default=4)
     parser.add_argument('--sample', type=int, default=100)
     for option in ('slice-every', 'field-every', 'profile-every', 'progress-every', 'checkpoint-every'):
         help_text = 'override lattice-step interval for every selected case; 0 disables output except checkpoints'
@@ -201,7 +203,8 @@ def main():
         parser.error(str(error))
     configs = [configuration(c, args) for c in sorted(selected)]
     if args.plan:
-        execution = dict(gpus=args.gpus, devices=args.devices, halo_transport=args.halo_transport, split_z=args.split_z)
+        execution = dict(gpus=args.gpus, devices=args.devices, halo_transport=args.halo_transport, split_z=args.split_z,
+                         field_io=args.field_io, io_workers=args.io_workers)
         print(json.dumps([dict(config=c, storage=storage(c), execution=execution) for c in configs], indent=2))
         return 0
     output_root, results_root = args.output_root.resolve(), args.results_root.resolve()
@@ -221,11 +224,22 @@ def main():
                 hdf5_run = Path(cfg['hdf5_root'])/'rayleigh_benard'/rid
                 entry = state['jobs'].setdefault(rid, {})
                 entry.update(run=str(run), hdf5=str(hdf5_run), results=str(post), storage=storage(cfg))
-                entry['execution'] = dict(gpus=args.gpus, devices=args.devices, halo_transport=args.halo_transport, split_z=args.split_z)
+                entry['execution'] = dict(gpus=args.gpus, devices=args.devices, halo_transport=args.halo_transport, split_z=args.split_z,
+                                          field_io=args.field_io, io_workers=args.io_workers)
                 manifest, receipt = run/'production_run.json', run/'simulation_complete.json'
                 if manifest.exists():
-                    if json.loads(manifest.read_text()) != cfg:
-                        raise RuntimeError(f'configuration mismatch: {run}; restore original options or select another --output-root')
+                    previous = json.loads(manifest.read_text())
+                    if previous != cfg:
+                        temperature_transition = (previous.get('export_fields') == ['temperature', 'ux', 'uy', 'uz'] and
+                                                  dict(previous, export_fields=['temperature']) == cfg)
+                        if temperature_transition and receipt.exists():
+                            # Completed historical exports keep their original configuration.
+                            cfg = previous
+                        elif temperature_transition and args.resume:
+                            atomic_json(run/'production_export_transition.json', dict(previous=previous, current=cfg))
+                            atomic_json(manifest, cfg)
+                        else:
+                            raise RuntimeError(f'configuration mismatch: {run}; restore original options or select another --output-root')
                 else:
                     if args.post_only or (run.exists() and any(run.iterdir())):
                         raise RuntimeError(f'no owned production manifest; refusing to overwrite/adopt {run}')
@@ -233,6 +247,7 @@ def main():
                         raise RuntimeError(f'refusing to adopt unowned HDF5 output: {hdf5_run}')
                     run.mkdir(parents=True, exist_ok=True)
                     atomic_json(manifest, cfg)
+                entry['storage'] = storage(cfg)
                 post.mkdir(parents=True, exist_ok=True)
                 if receipt.exists():
                     if json.loads(receipt.read_text()) != cfg:
@@ -254,7 +269,8 @@ def main():
                                '--rr', 3, '--precision', 'single', '--steps', cfg['steps'], '--transient-steps', cfg['transient_steps'],
                                '--sample', cfg['sample'], '--run-id', rid, '--output-root', output_root,
                                '--hdf5-root', cfg['hdf5_root'], '--arch', args.arch,
-                               '--gpus', args.gpus, '--halo-transport', args.halo_transport]
+                               '--gpus', args.gpus, '--halo-transport', args.halo_transport,
+                               '--field-io', args.field_io, '--io-workers', args.io_workers]
                     if args.devices is not None:
                         command += ['--devices', args.devices]
                     if args.split_z is not None:

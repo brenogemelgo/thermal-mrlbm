@@ -50,12 +50,15 @@ def main():
     p.add_argument('--checkpoint-every', type=int, default=5000)
     p.add_argument('--run-id', default=None)
     p.add_argument('--continue', dest='resume', action='store_true')
-    p.add_argument('--fields', action='store_true', help='legacy alias: 3D T and physical velocity at checkpoint cadence')
+    p.add_argument('--fields', action='store_true', help='legacy alias: 3D temperature at checkpoint cadence')
     for name in ('slice-every', 'field-every', 'profile-every', 'progress-every', 'output-start'):
         p.add_argument('--'+name, type=int, default=0, help='independent lattice-step schedule (0 disables interval)')
     p.add_argument('--slice-velocity', action='store_true', help='include physical uz alongside slice temperature')
     p.add_argument('--keep-checkpoints', type=int, default=0, help='0 keeps all; >=2 retains latest N atomic checkpoints')
     p.add_argument('--compression', type=int, choices=range(10), default=1, help='lossless HDF5 gzip level; 0 disables gzip')
+    p.add_argument('--field-io', choices=('async', 'sync', 'serial'), default='async',
+                   help='temperature snapshots: isolated background writer, synchronous encoder, or bounded plane fallback')
+    p.add_argument('--io-workers', type=int, choices=range(1, 33), default=4, help='CPU compression workers (default 4)')
     p.add_argument('--arch', default='sm_86')
     p.add_argument('--gpus', type=int, choices=(1, 2), default=1)
     p.add_argument('--devices', help='CUDA ordinals: e.g. 0 for one GPU, 0,1 for two')
@@ -118,7 +121,7 @@ def main():
     rid = a.run_id or (f'{tag}_n{n}_rr{a.rr}_{a.precision}' if a.validation else f'rbc{a.case}_n{n}_rr{a.rr}')
     run = [str(exe), '--runId', rid, '--checkpoint-every', str(a.checkpoint_every),
            '--output-root', str(a.output_root.resolve()), '--gpus', str(a.gpus),
-           '--halo-transport', a.halo_transport]
+           '--halo-transport', a.halo_transport, '--field-io', a.field_io, '--io-workers', str(a.io_workers)]
     if a.devices is not None:
         run += ['--devices', a.devices]
     if a.hdf5_root is not None:

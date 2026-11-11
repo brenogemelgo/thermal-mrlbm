@@ -22,6 +22,7 @@ struct Distributed
     virtual void download(real_t *, const real_t *, natural_t, natural_t, natural_t) = 0;
     virtual void upload(real_t *, const real_t *, natural_t, natural_t, natural_t) = 0;
     virtual void extract(real_t *, const real_t *, natural_t, bool, natural_t) = 0;
+    virtual double captureTemperature(real_t *, const real_t *) = 0;
     virtual void validation(double *, const real_t *, const real_t *) = 0;
     virtual std::string transportName() const = 0;
     virtual std::string deviceNames() const = 0;

@@ -113,8 +113,12 @@ outside the asynchronous ordinary-timestep path and included in sustained
 aggregate MLUPS, using the **global** lattice update count.
 
 HDF5 schema, global field ordering, original run IDs and data/results locations
-are preserved. Field extraction stages small local planes rather than gathering
-the whole domain on a GPU. Checkpoint transfers stage at most 32 global XY
+are preserved apart from the subsequently requested temperature-only 3D field set.
+Temperature capture copies disjoint local SoA ranges directly into one shared
+pinned host volume, with no full-domain GPU gather or packing kernel. Both GPU
+copies are enqueued before waiting for completion. The separate CPU writer then
+compresses/writes while timestepping resumes; see [the export guide](export-pipeline.md).
+Checkpoints retain all moments and stage at most 32 global XY
 planes of one moment at a time (32 MiB at 512³ FP32). The existing checkpoint
 header, 14-field order and statistical accumulators are unchanged. A restart
 may change one/two-GPU execution or slab split while retaining the same global

@@ -21,6 +21,12 @@
 #include <type_traits>
 #include <vector>
 
+namespace snapshot
+{
+inline std::string &mode();
+inline unsigned &workers();
+}
+
 static inline void outputCheckCuda(
     const cudaError_t err,
     const char *call)
@@ -266,6 +272,9 @@ static inline void writeMetadata(
     if (moment_io::distributed()) out << "gpu_devices = " << moment_io::distributed()->deviceNames() << '\n';
     out << "run_id = " << simulationRunId() << '\n';
     out << "field_velocity_convention = physical_u\n";
+    out << "field_fields = temperature\n";
+    out << "field_io = " << snapshot::mode() << '\n';
+    out << "io_workers = " << snapshot::workers() << '\n';
     out << "slice_every = " << outputSchedule().slices << '\n';
     out << "field_every = " << outputSchedule().fields << '\n';
     out << "profile_every = " << outputSchedule().profiles << '\n';
@@ -314,18 +323,18 @@ __global__ void extractOutputPlane(const real_t *m, real_t *packed, natural_t in
     for (int f = 0; f < 3; ++f)
         packed[size_t(f + 1) * plane + q] = loadMoment(m, i, UX + f) - a[f] / 2;
 }
-struct FieldOutput
+struct PlaneFieldOutput
 {
     real_t *device = nullptr;
     std::vector<real_t> host;
-    void allocate()
+    void allocate(bool slice)
     {
         if (device)
             return;
         host.resize(4 * size_t(NX) * std::max(NY, NZ));
-        outputCheckCuda(cudaMalloc(&device, host.size() * sizeof(real_t)), "output slab allocation");
+        if (slice) outputCheckCuda(cudaMalloc(&device, host.size() * sizeof(real_t)), "output slab allocation");
     }
-    ~FieldOutput()
+    ~PlaneFieldOutput()
     {
         if (device)
             cudaFree(device);
@@ -334,7 +343,7 @@ struct FieldOutput
     {
         if (moment_io::distributed())
             host.resize(4 * size_t(NX) * std::max(NY, NZ));
-        else allocate();
+        else allocate(slice);
         const auto dir = getSimulationHdf5Directory() / (slice ? "slices" : "fields");
         std::filesystem::create_directories(dir);
         const auto path = dir / (outputStepName(step) + ".h5");
@@ -358,12 +367,16 @@ struct FieldOutput
             const std::vector<hsize_t> dims = slice ? std::vector<hsize_t>{NZ, NX} : std::vector<hsize_t>{NZ, NY, NX};
             const std::vector<hsize_t> chunks = slice ? std::vector<hsize_t>{std::min(64u, NZ), std::min(128u, NX)} : std::vector<hsize_t>{1, std::min(64u, NY), std::min(128u, NX)};
             for (int f = 0; f < 4; ++f)
-                if (!slice || f == 0 || (outputSchedule().sliceVelocity && f == 3))
+                if (f == 0 || (slice && outputSchedule().sliceVelocity && f == 3))
                     datasets.emplace_back(new h5out::Handle(h5out::dataset(group, names[f], diskType, dims, chunks), H5Dclose));
             const size_t plane = size_t(NX) * (slice ? NZ : NY);
             for (natural_t z = 0; z < (slice ? 1u : NZ); ++z)
             {
-                if (moment_io::distributed())
+                if (!slice)
+                {
+                    moment_io::download(host.data(), m, TEMP, z * STRIDE, STRIDE);
+                }
+                else if (moment_io::distributed())
                 {
                     moment_io::distributed()->extract(host.data(), m, slice ? NY / 2 : z, slice, step);
                 }
@@ -375,7 +388,7 @@ struct FieldOutput
                 }
                 int d = 0;
                 for (int f = 0; f < 4; ++f)
-                    if (!slice || f == 0 || (outputSchedule().sliceVelocity && f == 3))
+                    if (f == 0 || (slice && outputSchedule().sliceVelocity && f == 3))
                     {
                         if (slice)
                             h5out::slab(*datasets[d++], memType, host.data() + f * plane, {0, 0}, {NZ, NX});
@@ -387,6 +400,22 @@ struct FieldOutput
         }
         std::filesystem::rename(tmp, path);
     }
+};
+
+#include "temperatureOutput.cuh"
+
+struct FieldOutput
+{
+    PlaneFieldOutput planes;
+    snapshot::TemperatureOutput temperature;
+    void save(const real_t *moments, natural_t step, bool slice)
+    {
+        if (slice || snapshot::mode() == "serial") planes.save(moments, step, slice);
+        else temperature.save(moments, step);
+    }
+    void poll() {temperature.poll();}
+    void drain() {temperature.drain();}
+    double backgroundSeconds() const {return temperature.backgroundSeconds();}
 };
 static inline void writeScalarOutput(const real_t *deviceField, const char *name)
 {

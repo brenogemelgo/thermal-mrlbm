@@ -11,7 +11,8 @@ The separate [pre-production campaign](docs/preproduction-validation.md) impleme
 V1–V5, manufactured solutions, sequential execution/resume, and consolidated
 analysis. See [the production campaign and HDF5 guide](docs/production-rbc.md) for
 the four 512³ RR3 runs, output schedules, storage estimates and RBC-3-only video
-post-processing. Full exports contain temperature and physical velocity; VTI is off.
+post-processing. Full snapshots contain temperature only; velocity-based metrics
+remain in the online statistics. VTI is off during simulation.
 See [the two-GPU PCIe guide](docs/multi-gpu.md) for overlapped peer halo exchange,
 slab specialization, memory requirements and verification limits.
 
@@ -48,3 +49,5 @@ grid, dissipation, heat-flux and boundary-layer diagnostics.
 
 The [focused performance report](docs/performance-rbc.md) documents fused NEE
 processing, GPU reduction changes, before/after measurements and short-test results.
+The [HDF5 export guide](docs/export-pipeline.md) describes pinned temperature
+capture, the isolated background writer, timing interpretation and export benchmarks.

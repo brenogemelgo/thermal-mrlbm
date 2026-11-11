@@ -11,9 +11,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def hdf5_flags():
     if os.environ.get('HDF5_FLAGS'):
-        return shlex.split(os.environ['HDF5_FLAGS'])
+        return shlex.split(os.environ['HDF5_FLAGS']) + ['-lz', '-lpthread']
     try:
-        return shlex.split(subprocess.check_output(['pkg-config', '--cflags', '--libs', 'hdf5'], text=True))
+        return shlex.split(subprocess.check_output(['pkg-config', '--cflags', '--libs', 'hdf5'], text=True)) + ['-lz', '-lpthread']
     except (OSError, subprocess.CalledProcessError) as error:
         raise RuntimeError('Install HDF5 development files and pkg-config, or set HDF5_FLAGS') from error
 

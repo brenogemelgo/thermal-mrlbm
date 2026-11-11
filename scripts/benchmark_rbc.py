@@ -77,11 +77,16 @@ def main():
     parser.add_argument('--grids', type=int, nargs='+', choices=(32, 64, 96, 128), default=[64, 128])
     parser.add_argument('--steps', type=int, default=200)
     parser.add_argument('--sample', type=int, default=100)
+    parser.add_argument('--field-every', type=int, default=0, help='short export comparison; 0 disables snapshots')
+    parser.add_argument('--field-io', choices=('async', 'sync', 'serial'), default='async', help='after tree only')
+    parser.add_argument('--io-workers', type=int, choices=range(1, 33), default=4)
     parser.add_argument('--repeats', type=int, default=3)
     parser.add_argument('--arch', default=os.environ.get('CUDA_ARCH', 'sm_86'))
     args = parser.parse_args()
     if not (20 < args.steps <= 1000 and 1 <= args.sample <= args.steps - 20 and 1 <= args.repeats <= 10):
         parser.error('use 21..1000 steps, 1..steps-20 sampling, and 1..10 repeats')
+    if args.field_every < 0:
+        parser.error('field-every must be nonnegative')
     work = (args.work or Path(tempfile.mkdtemp(prefix='thermal-rbc-benchmark-'))).resolve()
     if work.exists() and any(work.iterdir()):
         parser.error('--work must be empty; successful results are never overwritten')
@@ -94,6 +99,7 @@ def main():
                      f'(checkpoints plus build margin); available {free_bytes / 2**30:.2f} GiB; '
                      'choose another --work filesystem or fewer repeats')
     report = dict(grids=args.grids, steps=args.steps, sample=args.sample, repeats=args.repeats,
+                  field_every=args.field_every, field_io=args.field_io, io_workers=args.io_workers,
                   arch=args.arch, flags='-O3 --restrict -lineinfo --resource-usage', results={})
     gpu = subprocess.run(['nvidia-smi', '--query-gpu=name,driver_version,memory.total,clocks.current.sm,power.limit', '--format=csv'],
                          text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -113,7 +119,7 @@ def main():
         results = report['results'][str(n)] = {}
         binaries = {}
         for label, tree in trees.items():
-            results[label] = dict(solver_elapsed_s=[], solver_mlups=[])
+            results[label] = dict(solver_elapsed_s=[], solver_mlups=[], solver_compute_mlups=[], solver_output_s=[])
             common = ['nvcc', '-std=c++20', '-O3', '--restrict', '--expt-relaxed-constexpr', '--extended-lambda',
                       f'-arch={args.arch}', '-lineinfo', '--resource-usage', '-DCASE_RAYLEIGH_BENARD',
                       f'-DRBC_N={n}', '-DRBC_TRANSIENT_STEPS=20', f'-DRBC_SAMPLE={args.sample}']
@@ -139,13 +145,22 @@ def main():
                 executables = binaries[label]
                 folder = work / f'{label}-run-{n}-{repeat}'
                 folder.mkdir()
-                text = execute([executables['solver'], '--runId', 'deterministic', '--steps', args.steps,
-                                '--checkpoint-every', args.steps], folder, folder / 'solver.log')
+                command = [executables['solver'], '--runId', 'deterministic', '--steps', args.steps,
+                           '--checkpoint-every', args.steps]
+                if args.field_every:
+                    command += ['--field-every', args.field_every]
+                    if label == 'after':
+                        command += ['--field-io', args.field_io, '--io-workers', args.io_workers]
+                text = execute(command, folder, folder / 'solver.log')
                 match = re.search(r'elapsed ([\d.eE+-]+) s; ([\d.eE+-]+) MLUPS', text)
                 if not match:
                     raise RuntimeError('solver timing line missing')
                 results[label]['solver_elapsed_s'].append(float(match[1]))
                 results[label]['solver_mlups'].append(float(match[2]))
+                with h5py.File(folder/'output/rayleigh_benard/deterministic/statistics.h5') as source:
+                    runtime = source['statistics/runtime'][-1]
+                    results[label]['solver_compute_mlups'].append(float(runtime[10]))
+                    results[label]['solver_output_s'].append(float(runtime[8]))
         for label in binaries:
             results[label]['median_solver_mlups'] = statistics.median(results[label]['solver_mlups'])
         if args.before:

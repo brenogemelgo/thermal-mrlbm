@@ -61,7 +61,7 @@ def configuration(case, args):
                slice_every=interval('slice_every', 0),
                field_every=field_interval,
                profile_every=interval('profile_every', round(p['tff'])),
-               progress_every=interval('progress_every', round(p['tff']*.1)),
+               progress_every=interval('progress_every', 1000),
                checkpoint_every=interval('checkpoint_every', 100000),
                output_start=args.output_start, keep_checkpoints=args.keep_checkpoints,
                compression=args.compression, slice_velocity=args.slice_velocity,
@@ -230,13 +230,15 @@ def main():
                 if manifest.exists():
                     previous = json.loads(manifest.read_text())
                     if previous != cfg:
+                        progress_transition = dict(previous, progress_every=cfg['progress_every']) == cfg
                         temperature_transition = (previous.get('export_fields') == ['temperature', 'ux', 'uy', 'uz'] and
-                                                  dict(previous, export_fields=['temperature']) == cfg)
-                        if temperature_transition and receipt.exists():
+                                                  dict(previous, export_fields=['temperature'], progress_every=cfg['progress_every']) == cfg)
+                        if (temperature_transition or progress_transition) and receipt.exists():
                             # Completed historical exports keep their original configuration.
                             cfg = previous
-                        elif temperature_transition and args.resume:
-                            atomic_json(run/'production_export_transition.json', dict(previous=previous, current=cfg))
+                        elif (temperature_transition or progress_transition) and args.resume:
+                            if temperature_transition:
+                                atomic_json(run/'production_export_transition.json', dict(previous=previous, current=cfg))
                             atomic_json(manifest, cfg)
                         else:
                             raise RuntimeError(f'configuration mismatch: {run}; restore original options or select another --output-root')

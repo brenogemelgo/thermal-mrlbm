@@ -52,7 +52,8 @@ def main():
     p.add_argument('--continue', dest='resume', action='store_true')
     p.add_argument('--fields', action='store_true', help='legacy alias: 3D temperature at checkpoint cadence')
     for name in ('slice-every', 'field-every', 'profile-every', 'progress-every', 'output-start'):
-        p.add_argument('--'+name, type=int, default=0, help='independent lattice-step schedule (0 disables interval)')
+        p.add_argument('--'+name, type=int, default=1000 if name == 'progress-every' else 0,
+                       help='independent lattice-step schedule (0 disables interval; progress defaults to 1000)')
     p.add_argument('--slice-velocity', action='store_true', help='include physical uz alongside slice temperature')
     p.add_argument('--keep-checkpoints', type=int, default=0, help='0 keeps all; >=2 retains latest N atomic checkpoints')
     p.add_argument('--compression', type=int, choices=range(10), default=1, help='lossless HDF5 gzip level; 0 disables gzip')

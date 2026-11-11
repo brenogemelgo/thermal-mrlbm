@@ -132,7 +132,7 @@ static inline std::filesystem::path getSimulationHdf5Directory()
 
 struct OutputSchedule
 {
-    natural_t slices = 0, fields = 0, profiles = 0, progress = 0, start = 0, keepCheckpoints = 0;
+    natural_t slices = 0, fields = 0, profiles = 0, progress = 1000, start = 0, keepCheckpoints = 0;
     natural_t checkpoints = STAMP, end = NSTEPS;
     bool sliceVelocity = false;
 };

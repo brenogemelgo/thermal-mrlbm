@@ -367,9 +367,13 @@ static int run(int argc, char **argv)
             }
             saved = true;
         }
-        if (saved || due(step, outputSchedule().progress))
+        const bool progressDue = due(step, outputSchedule().progress) || step == endStep;
+        if (saved || progressDue)
         {
             fieldOutput.poll();
+        }
+        if (progressDue)
+        {
             // Saves above already wait for their device work, including the
             // statistics profile copy. Only a heartbeat needs another wait.
             if (!saved)

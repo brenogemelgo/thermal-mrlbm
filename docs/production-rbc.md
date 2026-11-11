@@ -29,7 +29,8 @@ The horizontal aspect ratio is `512/511`; compiled FP32 constants have roundoff.
   accumulators are unchanged.
 - **Average profiles: every 10220 steps (1 tff)** and checkpoints/completion.
   These are the latest cumulative averages, not a growing full-field history.
-- **Progress heartbeat: every 1022 steps (0.1 tff)**, and every save/sample point.
+- **Console progress: every 1000 steps (about 0.0978 tff)**, plus session start
+  and completion. Statistical sampling remains every 100 steps.
 - Separate 2D slices are off; `--slice-every` can enable them explicitly.
 - Python video preview is enabled only for RBC-3, unless `--no-video` is supplied.
   It reads an XZ hyperslab of each volume when separate slices are absent. This
@@ -233,7 +234,7 @@ local Kolmogorov diagnostics, correlation/batch errors and stationarity cautions
 
 ## Runtime and restart semantics
 
-Every save/sampling point and heartbeat prints a flushed line with step, global
+Every configured progress interval and completion prints a flushed line with step, global
 completion percentage, session elapsed wall seconds, window/cumulative sustained
 MLUPS and ETA. Initial output reports unavailable rates until the first window.
 One update means **one complete coupled hydro/thermal lattice cell step**, not
@@ -312,6 +313,8 @@ The default asynchronous path uses one pinned temperature volume (512 MiB at
 while interrupted output requires explicit `--resume`. A matching completed post
 receipt skips analysis; `--post-only` regenerates it. Failures retain prior results.
 Repeat the original configuration/location overrides on resume or post-only.
+The console progress interval may change with `--resume`; this logging-only
+change leaves the sampling and scientific output configuration intact.
 
 ## Changed files and verification limits
 

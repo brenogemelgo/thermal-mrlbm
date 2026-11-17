@@ -15,6 +15,15 @@ legacy temperature + physical velocity volumes still produce the original vector
 VTI. Explicitly requested `--slice-velocity` retains its existing 2D uz output.
 Checkpoints retain all fourteen moments and the complete statistical state.
 
+Offline VTI conversion now defaults to XML-safe Base64 appended data. Earlier raw
+appended VTI files are supported by VTK-aware readers but can fail a general XML
+parser. Rebuild with `make converter` and regenerate with
+`./convertVTI <hdf5-location> --jobs 4 --overwrite` if needed. Values and precision
+are preserved; Base64 uses about 4/3 of the raw VTI storage. `--encoding raw`
+retains the smaller representation. `--skip-existing` checks the XML envelope and
+size but does not checksum existing payloads. See the
+[converter documentation](production-rbc.md#compiled-parallel-convertvti-application).
+
 ## Execution and resource ownership
 
 ```bash

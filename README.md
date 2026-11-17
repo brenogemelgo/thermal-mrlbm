@@ -43,6 +43,11 @@ checkpoints remain under `output/rayleigh_benard/<run_id>/`; results use
 `results/<run_id>/`. RBC-1/2 export fields every 5,000 steps; RBC-3/4 every 10,000.
 All cases checkpoint every 100,000 steps. Builds also compile `build/convertVTI`: explicit offline
 conversion uses `./build/convertVTI <hdf5-location> --jobs 4` (parallel CPU workers).
+VTI uses XML-safe Base64 by default; `--encoding raw` selects smaller raw binary,
+and `--overwrite` explicitly regenerates existing VTI files after rebuilding.
+To build the project and convert in one command, use
+`./runConvertVTI.sh /path/to/hdf5 --jobs 4 --overwrite`; all converter arguments
+are forwarded, and `--help` lists options. This builds the solver without running it.
 The launcher defaults to `sm_86`; set `--arch` (or `CUDA_ARCH` for the test suite)
 for another GPU. Production DNS convergence must be established using time,
 grid, dissipation, heat-flux and boundary-layer diagnostics.

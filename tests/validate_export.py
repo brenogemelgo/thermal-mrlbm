@@ -102,7 +102,10 @@ def main():
     converter = build_converter()
     for rid in ('reference', 'async'):
         source = work/'raw/rayleigh_benard'/rid
-        execute([converter, source, '--results-root', work/'converted', '--jobs', 2], work/f'convert-{rid}.log')
+        # This legacy check inspects raw appended bytes directly. The default
+        # XML-safe Base64 encoding is covered by validate_converter.py.
+        execute([converter, source, '--results-root', work/'converted', '--jobs', 2,
+                 '--encoding', 'raw'], work/f'convert-{rid}.log')
         for path in (work/'converted'/rid/'vtis').glob('*.vti'):
             raw = path.read_bytes();start = raw.index(b'\n_')+2
             length = struct.unpack_from('<Q', raw, start)[0]

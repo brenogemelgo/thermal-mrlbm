@@ -128,8 +128,8 @@ up to four workers, bounded by available logical CPUs; `--jobs N` selects 1..256
 workers, with no more processes than input files. Separate processes avoid
 requiring a thread-safe HDF5 build. Each worker stages only O(N²) plane buffers,
 then writes a scalar temperature and an interleaved three-component velocity
-vector in uncompressed VTI. Array order and precision are preserved. No global
-3D arrays or populations are introduced. More workers are not a guaranteed
+vector (when present) in uncompressed VTI. Array order and precision are
+preserved. No global 3D arrays or populations are introduced. More workers are not a guaranteed
 speedup when the drive is saturated. A CUDA backend is not implemented: HDF5
 reading/decompression and filesystem writes remain CPU operations, while a GPU
 packing kernel would require additional host/device transfers. No performance
@@ -138,16 +138,51 @@ claim is made without measurements.
 Outputs are `results/<original_run_id>/vtis/`, relative to the converter working
 directory; `--results-root DIRECTORY` changes that root. `--step N` filters a
 snapshot timestep and may be repeated. Existing outputs are refused by default;
-`--skip-existing` resumes conversion after checking expected file size. Atomic
-renames, a batch lock and per-output locks preserve completed files on failure.
-A worker failure stops the batch; completed files remain. Skipping existing data
-checks file size, not a full content checksum. Temporary `.tmp` files from a
+`--skip-existing` resumes conversion after checking expected file size, XML header,
+encoding and closing tags. It does not checksum the payload. `--overwrite` explicitly
+regenerates existing outputs by atomic replacement after a successful close; a
+failed conversion preserves the previous file. These two flags are mutually
+exclusive. Atomic renames, a batch lock and per-output locks preserve completed files on failure.
+A worker failure stops the batch; completed files remain. Temporary `.tmp` files from a
 terminated worker are replaced on retry; output locks are small persistent files.
 The old `scripts/export_rbc_vti.py` command delegates to the compiled executable.
 
-The converter follows the [VTK XML ImageData format](https://docs.vtk.org/en/v9.6.1/vtk_file_formats/vtkxml_file_format.html),
-with little-endian appended data and UInt64 byte-count headers. Run it after the
-solver has exited; SWMR access to live statistics files is not enabled.
+The converter uses **Base64 appended data by default**, with little-endian values
+and UInt64 byte-count headers. Each array's length header and payload form one
+Base64 block; appended offsets count encoded characters. Encoding streams across
+planes with bounded buffers and preserves the field bits, including FP64 data.
+The resulting file is well-formed XML, verified with independent XML and VTK readers.
+The previous raw-binary representation is valid for VTK-aware readers but a general
+XML parser can report an invalid token inside its payload. Select `--encoding raw`
+explicitly for that representation; it is smaller and remains supported.
+
+To regenerate earlier files after an XML error:
+
+```bash
+make converter
+./convertVTI /mnt/rbc_hdf5/rayleigh_benard/rbc3_n512_rr3 --jobs 4 --overwrite
+```
+
+Alternatively, the executable root-level `runConvertVTI.sh` builds the full project
+with `make all` (solver build only), then forwards all arguments to `convertVTI`:
+
+```bash
+./runConvertVTI.sh /mnt/rbc_hdf5 --jobs 4 --overwrite
+./runConvertVTI.sh /mnt/rbc_hdf5 --jobs 4 --skip-existing --results-root results
+```
+
+Use `--help` for options. Input/results paths remain relative to the calling
+directory. Build settings follow the Makefile: for example,
+`RBC_ARGS='--case 3 --grid 512 --rr 3 --arch sm_89' ./runConvertVTI.sh /mnt/rbc_hdf5`.
+By default it builds RBC-1, 512³, RR3 for sm_86. A build failure stops conversion.
+
+For converter-only regression tests, install NumPy, h5py and VTK Python bindings,
+then run `python3 tests/validate_converter.py`. Add `--large` for a 512³ temperature
+conversion with VTK subextent reads; it uses no solver or CUDA kernels.
+`--skip-vtk` selects XML/byte-level checks when the VTK bindings are unavailable.
+
+The converter follows the [VTK XML ImageData format](https://docs.vtk.org/en/v9.6.1/vtk_file_formats/vtkxml_file_format.html).
+Run it after the solver has exited; SWMR access to live statistics files is not enabled.
 
 ## Storage: decimal TB, no compression savings
 
@@ -176,9 +211,12 @@ checkpoint headers and retained history copies bring the numeric total to about
 **1.215 TB**, before container/filesystem overhead, plots and video. There are
 26, 31, 52 and 52 checkpoint writes, but only two pairs per case are retained.
 An atomic checkpoint commit temporarily retains a third checkpoint/history pair.
-Each explicitly converted VTI adds the same numeric payload as its
-source volume (0.5 GiB for new temperature-only files); converting RBC-3 alone adds about **0.274878 TB** before
-small XML/block/lock overhead. These are stored bytes, not cumulative write traffic.
+With the default Base64 encoding, each explicitly converted VTI adds approximately
+4/3 of its source numeric payload: **715827896 bytes** per 512³ FP32 temperature
+block, plus XML/lock overhead. Converting all 512 RBC-3 timestamps adds about
+**0.366504 TB**. With `--encoding raw`, each adds 0.5 GiB and RBC-3 adds about
+**0.274878 TB**, plus small XML/block/lock overhead. HDF5 storage is unchanged.
+These are stored bytes, not cumulative write traffic.
 
 ### Comparison with the previous 10000-step RBC-1/2 output
 

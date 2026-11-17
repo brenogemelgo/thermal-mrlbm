@@ -89,19 +89,89 @@ static void writeBytes(std::ostream &out,const void *data,size_t bytes)
     out.write(static_cast<const char *>(data),static_cast<std::streamsize>(bytes));
     require(bool(out),"VTI write failed (check available storage)");
 }
-static void writeLength(std::ostream &out,uint64_t length)
+static uint64_t appendedBytes(uint64_t bytes,bool base64)
 {
-    unsigned char bytes[8];
-    for(int i=0;i<8;++i) bytes[i]=static_cast<unsigned char>((length>>(8*i))&255);
-    writeBytes(out,bytes,8);
+    if(!base64) return bytes;
+    require(bytes<=std::numeric_limits<uint64_t>::max()-2,"Base64 length overflow");
+    return multiply((bytes+2)/3,4);
 }
+// Encode each complete UInt64-length + payload block as one Base64 stream.
+// Padding is emitted only at array boundaries, never between streamed planes.
+// VTK's appended offsets count encoded characters when encoding="base64".
+class AppendedData
+{
+    std::ostream &out;
+    bool base64;
+    std::array<unsigned char,3> tail{};
+    size_t pending=0;
+    std::array<char,65536> encoded{};
+
+    static void triple(const unsigned char *input,char *output)
+    {
+        static constexpr char alphabet[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        output[0]=alphabet[input[0]>>2];
+        output[1]=alphabet[((input[0]&3)<<4)|(input[1]>>4)];
+        output[2]=alphabet[((input[1]&15)<<2)|(input[2]>>6)];
+        output[3]=alphabet[input[2]&63];
+    }
+
+public:
+    AppendedData(std::ostream &stream,bool encode):out(stream),base64(encode) {}
+    void write(const void *data,size_t bytes)
+    {
+        if(!base64) {writeBytes(out,data,bytes);return;}
+        auto input=static_cast<const unsigned char *>(data);
+        if(pending)
+        {
+            while(bytes && pending<3) {tail[pending++]=*input++;--bytes;}
+            if(pending<3) return;
+            triple(tail.data(),encoded.data());writeBytes(out,encoded.data(),4);pending=0;
+        }
+        while(bytes>=3)
+        {
+            const size_t count=std::min(bytes/3,encoded.size()/4);
+            for(size_t i=0;i<count;++i) triple(input+3*i,encoded.data()+4*i);
+            writeBytes(out,encoded.data(),4*count);input+=3*count;bytes-=3*count;
+        }
+        while(bytes) {tail[pending++]=*input++;--bytes;}
+    }
+    void begin(uint64_t length)
+    {
+        require(pending==0,"unfinished appended array");
+        unsigned char bytes[8];
+        for(int i=0;i<8;++i) bytes[i]=static_cast<unsigned char>((length>>(8*i))&255);
+        write(bytes,8);
+    }
+    void finish()
+    {
+        if(!pending) return;
+        const size_t count=pending;
+        while(pending<3) tail[pending++]=0;
+        triple(tail.data(),encoded.data());
+        encoded[3]='=';
+        if(count==1) encoded[2]='=';
+        writeBytes(out,encoded.data(),4);pending=0;
+    }
+};
 struct Options
 {
     fs::path input,results="results";
     std::set<uint64_t> steps;
-    bool skipExisting=false;
+    bool skipExisting=false,overwrite=false,base64=true;
     unsigned jobs=static_cast<unsigned>(std::min<long>(4,std::max<long>(1,sysconf(_SC_NPROCESSORS_ONLN))));
 };
+static bool matchesExisting(const fs::path &path,const std::string &prefix,
+                            const std::string &suffix,uint64_t payloadBytes)
+{
+    if(fs::file_size(path)!=prefix.size()+payloadBytes+suffix.size()) return false;
+    std::ifstream file(path,std::ios::binary);
+    std::string text(prefix.size(),'\0');
+    file.read(text.data(),text.size());
+    if(!file || text!=prefix) return false;
+    file.seekg(-static_cast<std::streamoff>(suffix.size()),std::ios::end);
+    text.resize(suffix.size());file.read(text.data(),text.size());
+    return bool(file) && text==suffix;
+}
 struct OutputLock
 {
     int descriptor=-1;
@@ -162,6 +232,10 @@ static bool convert(const fs::path &source,const Options &options,std::set<fs::p
     require(planeBytes<=std::numeric_limits<size_t>::max()/3,"plane allocation overflow");
     const hid_t diskType=bytes==4 ? H5T_IEEE_F32LE : H5T_IEEE_F64LE;
     const char *vtkType=bytes==4 ? "Float32" : "Float64";
+    const uint64_t scalarBlock=appendedBytes(8+scalarBytes,options.base64);
+    const uint64_t vectorBlock=hasVelocity ? appendedBytes(8+3*scalarBytes,options.base64) : 0;
+    require(scalarBlock<=std::numeric_limits<uint64_t>::max()-vectorBlock,"VTI file size overflow");
+    require(scalarBlock+vectorBlock<=std::numeric_limits<uint64_t>::max()-4096,"VTI file size overflow");
     std::ostringstream name; name<<"step_";
     const auto number=std::to_string(step); name<<std::string(number.size()<9?9-number.size():0,'0')<<number<<".vti";
     const auto destination=options.results/runId/"vtis"/name.str();
@@ -174,15 +248,17 @@ static bool convert(const fs::path &source,const Options &options,std::set<fs::p
           <<(hasVelocity ? " Vectors=\"velocity\"" : "")<<">\n"
           <<"        <DataArray type=\""<<vtkType<<"\" Name=\"temperature\" NumberOfComponents=\"1\" format=\"appended\" offset=\"0\"/>\n";
     if(hasVelocity)
-        header<<"        <DataArray type=\""<<vtkType<<"\" Name=\"velocity\" NumberOfComponents=\"3\" format=\"appended\" offset=\""<<scalarBytes+8<<"\"/>\n";
-    header<<"      </PointData>\n      <CellData/>\n    </Piece>\n  </ImageData>\n  <AppendedData encoding=\"raw\">\n_";
+        header<<"        <DataArray type=\""<<vtkType<<"\" Name=\"velocity\" NumberOfComponents=\"3\" format=\"appended\" offset=\""<<scalarBlock<<"\"/>\n";
+    header<<"      </PointData>\n      <CellData/>\n    </Piece>\n  </ImageData>\n  <AppendedData encoding=\""
+          <<(options.base64 ? "base64" : "raw")<<"\">\n_";
     const std::string prefix=header.str(),suffix="\n  </AppendedData>\n</VTKFile>\n";
     foundSteps.insert(step);
     OutputLock outputLock(destination);
-    if(fs::exists(destination))
+    if(fs::exists(destination) && !options.overwrite)
     {
-        require(options.skipExisting,"refusing to overwrite "+destination.string()+" (use --skip-existing to resume)");
-        require(fs::file_size(destination)==prefix.size()+(hasVelocity ? 16+4*scalarBytes : 8+scalarBytes)+suffix.size(),"existing VTI has an incompatible size");
+        require(options.skipExisting,"refusing to overwrite "+destination.string()+" (use --skip-existing to resume or --overwrite to regenerate)");
+        require(matchesExisting(destination,prefix,suffix,scalarBlock+vectorBlock),
+                "existing VTI is incompatible or incomplete; use --overwrite to regenerate "+destination.string());
         std::cout<<"preserved "<<destination<<'\n'; return true;
     }
     fs::create_directories(destination.parent_path());
@@ -191,13 +267,15 @@ static bool convert(const fs::path &source,const Options &options,std::set<fs::p
     {
         std::ofstream out(temporary,std::ios::binary|std::ios::trunc);
         require(bool(out),"cannot create "+temporary.string());
-        writeBytes(out,prefix.data(),prefix.size()); writeLength(out,scalarBytes);
+        writeBytes(out,prefix.data(),prefix.size());
+        AppendedData appended(out,options.base64);appended.begin(scalarBytes);
         std::vector<unsigned char> scalar(static_cast<size_t>(planeBytes));
         for(hsize_t z=0;z<dims[0];++z)
-        { plane(temperature,diskType,z,dims[1],dims[2],scalar.data()); writeBytes(out,scalar.data(),scalar.size()); }
+        { plane(temperature,diskType,z,dims[1],dims[2],scalar.data()); appended.write(scalar.data(),scalar.size()); }
+        appended.finish();
         if(hasVelocity)
         {
-            writeLength(out,3*scalarBytes);
+            appended.begin(3*scalarBytes);
             std::array<std::vector<unsigned char>,3> component;
             for(auto &values:component) values.resize(static_cast<size_t>(planeBytes));
             std::vector<unsigned char> packed(static_cast<size_t>(3*planeBytes));
@@ -206,8 +284,9 @@ static bool convert(const fs::path &source,const Options &options,std::set<fs::p
                 for(int d=0;d<3;++d) plane(*velocity[d],diskType,z,dims[1],dims[2],component[d].data());
                 for(size_t i=0;i<planeCells;++i) for(size_t d=0;d<3;++d)
                     std::memcpy(packed.data()+(3*i+d)*bytes,component[d].data()+i*bytes,bytes);
-                writeBytes(out,packed.data(),packed.size());
+                appended.write(packed.data(),packed.size());
             }
+            appended.finish();
         }
         writeBytes(out,suffix.data(),suffix.size()); out.close(); require(bool(out),"VTI close failed");
         fs::rename(temporary,destination);
@@ -330,24 +409,35 @@ static int run(int argc,char **argv)
         const std::string arg=argv[i];
         if(arg=="--help" || arg=="-h")
         {
-            std::cout<<"Usage: convertVTI <path/to/hdfs/location> [--jobs N] [--results-root DIR] [--step N] [--skip-existing]\n"
+            std::cout<<"Usage: convertVTI <path/to/hdfs/location> [--jobs N] [--results-root DIR] [--step N]\n"
+                     <<"                  [--encoding base64|raw] [--skip-existing | --overwrite]\n"
                      <<"Reads one file, a fields/run directory, or an HDF5 tree recursively.\n"
                      <<"Writes results/<original_run_id>/vtis/; CPU processes, default up to 4 workers.\n"
+                     <<"XML-safe Base64 by default; raw binary is optional for VTK-aware readers.\n"
+                     <<"--overwrite atomically regenerates existing outputs; --skip-existing validates their envelope.\n"
                      <<"No CUDA context or solver work; --jobs 1 selects serial conversion.\n";
             return 0;
         }
         if(arg=="--skip-existing") options.skipExisting=true;
-        else if(arg=="--results-root" || arg=="--step" || arg=="--jobs")
+        else if(arg=="--overwrite") options.overwrite=true;
+        else if(arg=="--results-root" || arg=="--step" || arg=="--jobs" || arg=="--encoding")
         {
             require(++i<argc,"missing value for "+arg);
             if(arg=="--results-root") options.results=argv[i];
             else if(arg=="--step") options.steps.insert(stepNumber(argv[i]));
+            else if(arg=="--encoding")
+            {
+                const std::string value=argv[i];
+                require(value=="base64" || value=="raw","--encoding must be base64 or raw");
+                options.base64=value=="base64";
+            }
             else {const auto n=stepNumber(argv[i]);require(n>0 && n<=256,"--jobs must be between 1 and 256");options.jobs=static_cast<unsigned>(n);}
         }
         else if(!arg.empty() && arg[0]!='-' && options.input.empty()) options.input=arg;
         else throw std::runtime_error("unknown argument: "+arg);
     }
     require(!options.input.empty(),"usage: convertVTI <path/to/hdfs/location> [--help]");
+    require(!options.skipExisting || !options.overwrite,"--skip-existing and --overwrite are mutually exclusive");
     require(fs::exists(options.input),"HDF5 input location does not exist");
     if(fs::is_directory(options.input) && fs::is_directory(options.input/"hdf5"))
         options.input=fs::canonical(options.input/"hdf5");

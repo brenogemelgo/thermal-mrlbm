@@ -23,6 +23,14 @@
 #include <unistd.h>
 
 namespace fs = std::filesystem;
+#ifndef CONVERT_VTI_BUILD_SHA
+#define CONVERT_VTI_BUILD_SHA "unversioned"
+#endif
+static void version(std::ostream &out)
+{
+    out<<"thermal-mrlbm convertVTI 2; source="<<CONVERT_VTI_BUILD_SHA
+       <<"; default encoding=base64\n";
+}
 static void require(bool ok, const std::string &message)
 { if (!ok) throw std::runtime_error(message); }
 static void hcheck(herr_t value)
@@ -259,7 +267,7 @@ static bool convert(const fs::path &source,const Options &options,std::set<fs::p
         require(options.skipExisting,"refusing to overwrite "+destination.string()+" (use --skip-existing to resume or --overwrite to regenerate)");
         require(matchesExisting(destination,prefix,suffix,scalarBlock+vectorBlock),
                 "existing VTI is incompatible or incomplete; use --overwrite to regenerate "+destination.string());
-        std::cout<<"preserved "<<destination<<'\n'; return true;
+        std::cout<<"preserved "<<fs::absolute(destination).lexically_normal()<<'\n'; return true;
     }
     fs::create_directories(destination.parent_path());
     auto temporary=destination; temporary+=".tmp";
@@ -292,7 +300,7 @@ static bool convert(const fs::path &source,const Options &options,std::set<fs::p
         fs::rename(temporary,destination);
     }
     catch(...) { fs::remove(temporary); throw; }
-    std::cout<<destination<<'\n'; return true;
+    std::cout<<"wrote "<<fs::absolute(destination).lexically_normal()<<'\n'; return true;
 }
 struct Lock
 {
@@ -407,6 +415,7 @@ static int run(int argc,char **argv)
     for(int i=1;i<argc;++i)
     {
         const std::string arg=argv[i];
+        if(arg=="--version") {version(std::cout);return 0;}
         if(arg=="--help" || arg=="-h")
         {
             std::cout<<"Usage: convertVTI <path/to/hdfs/location> [--jobs N] [--results-root DIR] [--step N]\n"
@@ -414,6 +423,7 @@ static int run(int argc,char **argv)
                      <<"Reads one file, a fields/run directory, or an HDF5 tree recursively.\n"
                      <<"Writes results/<original_run_id>/vtis/; CPU processes, default up to 4 workers.\n"
                      <<"XML-safe Base64 by default; raw binary is optional for VTK-aware readers.\n"
+                     <<"--version prints the compiled source identity. Output paths are absolute.\n"
                      <<"--overwrite atomically regenerates existing outputs; --skip-existing validates their envelope.\n"
                      <<"No CUDA context or solver work; --jobs 1 selects serial conversion.\n";
             return 0;
@@ -449,6 +459,10 @@ static int run(int argc,char **argv)
         if(entry.is_regular_file()) add(entry.path());
     std::sort(files.begin(),files.end());
     require(!files.empty(),"no HDF5 files found");
+    version(std::cout);
+    std::cout<<"input: "<<fs::absolute(options.input).lexically_normal()<<'\n'
+             <<"results: "<<fs::absolute(options.results).lexically_normal()<<'\n'
+             <<"encoding: "<<(options.base64 ? "base64 (XML-safe)" : "raw (binary appended data)")<<'\n';
     Lock lock(options.results);std::set<uint64_t> foundSteps;
     const size_t converted=parallelConvert(files,options,foundSteps);
     require(converted>0,"no matching 3D temperature volumes found (statistics and slices are skipped)");

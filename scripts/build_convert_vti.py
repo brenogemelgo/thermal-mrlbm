@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build the independent CPU HDF5-to-VTI application; never start a solver."""
 import argparse
+import hashlib
 import os
 from pathlib import Path
 import shlex
@@ -19,12 +20,14 @@ def hdf5_flags():
 
 
 def build_converter(flags=None):
+    source = ROOT/'tools/convertVTI.cpp'
+    source_hash = hashlib.sha256(source.read_bytes()).hexdigest()[:16]
     destination = ROOT/'build/convertVTI'
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(f'convertVTI.{os.getpid()}.tmp')
     command = [*shlex.split(os.environ.get('CXX', 'c++')), '-std=c++20',
                *shlex.split(os.environ.get('CXXFLAGS', '-O3 -Wall -Wextra -Wpedantic')),
-               str(ROOT/'tools/convertVTI.cpp'), '-o', str(temporary),
+               f'-DCONVERT_VTI_BUILD_SHA="{source_hash}"', str(source), '-o', str(temporary),
                *(hdf5_flags() if flags is None else flags)]
     print(shlex.join(command), flush=True)
     try:

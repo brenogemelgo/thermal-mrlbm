@@ -18,6 +18,7 @@ Converter options (forwarded unchanged):
   --encoding base64|raw XML-safe Base64 by default
   --skip-existing       Resume after checking existing file envelopes and sizes
   --overwrite           Safely regenerate existing VTI files
+  --version             Print the newly compiled converter's source identity
 
 --skip-existing and --overwrite are mutually exclusive.
 Outputs: <results-root>/<original_run_id>/vtis/step_*.vti

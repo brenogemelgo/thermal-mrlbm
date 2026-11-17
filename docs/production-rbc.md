@@ -176,6 +176,25 @@ directory. Build settings follow the Makefile: for example,
 `RBC_ARGS='--case 3 --grid 512 --rr 3 --arch sm_89' ./runConvertVTI.sh /mnt/rbc_hdf5`.
 By default it builds RBC-1, 512³, RR3 for sm_86. A build failure stops conversion.
 
+For a remote ParaView XML error, run the check on the **remote PC**, using a
+fresh results root and only the first timestamp before converting the whole run:
+
+```bash
+make converter
+./convertVTI --version
+./convertVTI /path/to/hdf5/run --step 0 --jobs 1 --encoding base64 \
+  --results-root "$PWD/results_vti_check" --overwrite
+```
+
+The converter prints its compiled source hash, selected encoding and absolute
+input/results paths. Open the exact absolute VTI path printed after `wrote` in
+ParaView; remove the failed pipeline source and open this new file. The run ID
+subfolder remains unchanged. An older installed `convertVTI` on PATH may be a
+different program: use the repository's `./convertVTI` launcher.
+If the error persists, collect the full file path, the `--version` output and
+`head -c 550 /absolute/path/to/file.vti | cat -v` **on the remote PC**. A screenshot
+of an XML error cannot establish which binary produced the selected file.
+
 For converter-only regression tests, install NumPy, h5py and VTK Python bindings,
 then run `python3 tests/validate_converter.py`. Add `--large` for a 512³ temperature
 conversion with VTK subextent reads; it uses no solver or CUDA kernels.

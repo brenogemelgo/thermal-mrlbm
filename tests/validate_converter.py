@@ -7,6 +7,7 @@ reads; no CUDA builds, solver runs or full-volume host arrays are used.
 """
 import argparse
 import base64
+import hashlib
 import json
 from pathlib import Path
 import struct
@@ -179,6 +180,9 @@ def main():
     if any(work.iterdir()):
         parser.error('--work must be new or empty')
     binary = args.binary.resolve() if args.binary else build_converter()
+    version = execute(binary, '--version').stdout
+    source_hash = hashlib.sha256((ROOT/'tools/convertVTI.cpp').read_bytes()).hexdigest()[:16]
+    assert source_hash in version and 'default encoding=base64' in version, version
     source = work/'input'
     source.mkdir()
     fixtures = {}
@@ -192,17 +196,20 @@ def main():
         f.create_group('statistics')
     with h5py.File(source/'slice.h5', 'w') as f:
         f.create_dataset('fields/temperature', data=np.zeros((7, 11), dtype='f4'))
-    report = dict(work=str(work), checks={}, vtk_version=None if args.skip_vtk else vtkVersion.GetVTKVersion())
+    report = dict(work=str(work), converter_version=version.strip(), checks={},
+                  vtk_version=None if args.skip_vtk else vtkVersion.GetVTKVersion())
     for encoding in ('base64', 'raw'):
         for jobs in (1, 4):
             results = work/f'{encoding}-jobs{jobs}'
             # Also verify that no --encoding option means Base64.
             flags = [] if encoding == 'base64' else ['--encoding', encoding]
-            execute(binary, source, '--results-root', results, '--jobs', jobs, *flags)
+            result = execute(binary, source, '--results-root', results, '--jobs', jobs, *flags)
+            assert f'encoding: {encoding}' in result.stdout
             paths = sorted((results/'roundtrip/vtis').glob('*.vti'))
             assert len(paths) == len(fixtures)
             for path in paths:
                 step = int(path.stem.removeprefix('step_'))
+                assert str(path.resolve()) in result.stdout
                 check_volume(path, fixtures[step], encoding, not args.skip_vtk)
                 if jobs == 4:
                     assert path.read_bytes() == (work/f'{encoding}-jobs1/roundtrip/vtis'/path.name).read_bytes()
